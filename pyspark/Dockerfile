@@ -10,7 +10,13 @@ RUN pip install --no-cache-dir kafka-python==2.0.2 && \
     curl -o /opt/spark/jars/spark-token-provider-kafka-0-10_2.12-3.5.1.jar \
     https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.1/spark-token-provider-kafka-0-10_2.12-3.5.1.jar && \
     curl -o /opt/spark/jars/commons-pool2-2.11.1.jar \
-    https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar
+    https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar && \
+    curl -o /opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar \
+    https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.5.2/iceberg-spark-runtime-3.5_2.12-1.5.2.jar && \
+    curl -o /opt/spark/jars/aws-java-sdk-bundle-1.12.661.jar \
+    https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.661/aws-java-sdk-bundle-1.12.661.jar && \
+    curl -o /opt/spark/jars/hadoop-aws-3.3.4.jar \
+    https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar
 
 USER spark
 

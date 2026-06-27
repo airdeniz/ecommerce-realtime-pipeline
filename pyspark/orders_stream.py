@@ -1,16 +1,25 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, expr
-from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
+import sys
+sys.stdout.reconfigure(line_buffering=True)
 
-# Spark session
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import from_json, col
+from pyspark.sql.types import StructType, StructField, StringType, LongType
+
 spark = SparkSession.builder \
     .appName("ecommerce-orders-stream") \
-    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1") \
+    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
+    .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
+    .config("spark.sql.catalog.lakehouse.type", "hadoop") \
+    .config("spark.sql.catalog.lakehouse.warehouse", "s3a://lakehouse/") \
+    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
+    .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
+    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \
+    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
 
-# Kafka'dan gelen orders mesajının after kısmının şeması
 order_schema = StructType([
     StructField("order_id", LongType()),
     StructField("user_id", LongType()),
@@ -19,7 +28,6 @@ order_schema = StructType([
     StructField("created_at", StringType()),
 ])
 
-# Debezium mesajının dış şeması
 debezium_schema = StructType([
     StructField("payload", StructType([
         StructField("after", order_schema),
@@ -27,7 +35,6 @@ debezium_schema = StructType([
     ]))
 ])
 
-# Kafka'dan oku
 df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "kafka:9092") \
@@ -35,7 +42,6 @@ df = spark.readStream \
     .option("startingOffsets", "latest") \
     .load()
 
-# JSON parse et
 parsed = df.select(
     from_json(col("value").cast("string"), debezium_schema).alias("data")
 ).select(
@@ -43,11 +49,26 @@ parsed = df.select(
     col("data.payload.after.*")
 ).filter(col("op").isin("c", "u"))
 
-# Konsola yaz
+spark.sql("""
+    CREATE TABLE IF NOT EXISTS lakehouse.bronze.orders (
+        op STRING,
+        order_id BIGINT,
+        user_id BIGINT,
+        status STRING,
+        total_amount STRING,
+        created_at STRING
+    )
+    USING iceberg
+""")
+
+def write_to_iceberg(batch_df, batch_id):
+    if batch_df.count() > 0:
+        batch_df.writeTo("lakehouse.bronze.orders").append()
+        print(f"Batch {batch_id}: {batch_df.count()} kayit yazildi")
+
 query = parsed.writeStream \
-    .outputMode("append") \
-    .format("console") \
-    .option("truncate", False) \
+    .foreachBatch(write_to_iceberg) \
+    .option("checkpointLocation", "s3a://lakehouse/checkpoints/orders") \
     .start()
 
 query.awaitTermination()
