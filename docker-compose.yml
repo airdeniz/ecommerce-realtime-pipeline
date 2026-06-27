@@ -98,3 +98,11 @@ services:
       - ./debezium/register-connector.sh:/register-connector.sh
     entrypoint: ["/bin/sh", "/register-connector.sh"]
     restart: "no"
+
+  pyspark:
+    build: ./pyspark
+    container_name: ecom-pyspark
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: /opt/spark/bin/spark-submit /app/orders_stream.py
