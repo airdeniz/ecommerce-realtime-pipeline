@@ -1,0 +1,10 @@
+ecommerce:
+  target: dev
+  outputs:
+    dev:
+      type: spark
+      method: thrift
+      host: pyspark
+      port: 10000
+      schema: silver
+      threads: 1
