@@ -22,6 +22,8 @@ services:
     container_name: ecom-kafka
     ports:
       - "29092:29092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: "broker,controller"
@@ -156,8 +158,10 @@ services:
       - "8088:8088"
     environment:
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://superset:superset@superset-db:5432/superset
     depends_on:
-      - airflow-db
+      superset-db:
+        condition: service_healthy
 
   airflow-db:
     image: postgres:16
@@ -226,6 +230,23 @@ services:
       - ./dbt:/opt/airflow/dbt
     command: airflow scheduler
 
+  superset-db:
+    image: postgres:16
+    container_name: ecom-superset-db
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset
+      POSTGRES_DB: superset
+    volumes:
+      - superset_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   minio_data:
   airflow_db_data:
+  superset_db_data:
+  kafka_data:
