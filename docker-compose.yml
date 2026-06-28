@@ -107,6 +107,10 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      iceberg-db:
+        condition: service_healthy
     command: /opt/spark/bin/spark-submit /app/orders_stream.py
 
   spark-thrift:
@@ -117,6 +121,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      iceberg-db:
+        condition: service_healthy
     ports:
       - "10000:10000"
       - "4041:4040"
@@ -124,7 +130,10 @@ services:
       bash -c "/opt/spark/sbin/start-thriftserver.sh
       --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
       --conf spark.sql.catalog.lakehouse=org.apache.iceberg.spark.SparkCatalog
-      --conf spark.sql.catalog.lakehouse.type=hadoop
+      --conf spark.sql.catalog.lakehouse.catalog-impl=org.apache.iceberg.jdbc.JdbcCatalog
+      --conf spark.sql.catalog.lakehouse.uri=jdbc:postgresql://iceberg-db:5432/iceberg
+      --conf spark.sql.catalog.lakehouse.jdbc.user=iceberg
+      --conf spark.sql.catalog.lakehouse.jdbc.password=iceberg
       --conf spark.sql.catalog.lakehouse.warehouse=s3a://lakehouse/
       --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
       --conf spark.hadoop.fs.s3a.access.key=minioadmin
@@ -245,8 +254,24 @@ services:
       timeout: 5s
       retries: 10
 
+  iceberg-db:
+    image: postgres:16
+    container_name: ecom-iceberg-db
+    environment:
+      POSTGRES_USER: iceberg
+      POSTGRES_PASSWORD: iceberg
+      POSTGRES_DB: iceberg
+    volumes:
+      - iceberg_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceberg"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   minio_data:
   airflow_db_data:
   superset_db_data:
   kafka_data:
+  iceberg_db_data:

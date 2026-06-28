@@ -9,7 +9,10 @@ spark = SparkSession.builder \
     .appName("ecommerce-orders-stream") \
     .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
     .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
-    .config("spark.sql.catalog.lakehouse.type", "hadoop") \
+    .config("spark.sql.catalog.lakehouse.catalog-impl", "org.apache.iceberg.jdbc.JdbcCatalog") \
+    .config("spark.sql.catalog.lakehouse.uri", "jdbc:postgresql://iceberg-db:5432/iceberg") \
+    .config("spark.sql.catalog.lakehouse.jdbc.user", "iceberg") \
+    .config("spark.sql.catalog.lakehouse.jdbc.password", "iceberg") \
     .config("spark.sql.catalog.lakehouse.warehouse", "s3a://lakehouse/") \
     .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
     .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
@@ -95,6 +98,9 @@ debezium_order_item_schema = StructType([
 ])
 
 # Iceberg tablolari olustur (lsn + ts_ms ile -> downstream dedup icin)
+# JDBC catalog'da namespace otomatik olusmadigi icin once acikca yaratiyoruz.
+spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.bronze")
+
 spark.sql("""
     CREATE TABLE IF NOT EXISTS lakehouse.bronze.orders (
         op STRING, lsn BIGINT, ts_ms BIGINT,

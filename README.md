@@ -130,6 +130,10 @@ S3-compatible object storage. Holds Iceberg table files (Parquet data + metadata
 Open table format providing ACID transactions, schema evolution, time travel, and partition evolution on top of object storage.
 *Why:* Without Iceberg, MinIO would just hold raw Parquet files with no transaction guarantees. Iceberg makes a data lake behave like a data warehouse.
 
+**Iceberg Catalog — JDBC over Postgres (`iceberg-db`)**
+The catalog tracks the current metadata pointer for every Iceberg table. This project uses a **JDBC catalog** backed by a dedicated Postgres instance instead of the simpler Hadoop catalog.
+*Why:* The Hadoop catalog stores the metadata pointer as a file in object storage and commits by renaming it. On S3/MinIO, rename is **not atomic** and there is **no locking**, so two concurrent writers can clobber each other's commits — and here the streaming job writes bronze continuously while dbt writes silver/gold. A JDBC catalog turns each commit into an atomic Postgres transaction, which is the production-safe way to coordinate concurrent Iceberg writers without standing up a full Hive Metastore.
+
 **Spark Thrift Server**
 JDBC/ODBC endpoint exposing Spark SQL on port 10000.
 *Why:* `spark-submit` runs batch jobs. Thrift Server keeps Spark running so dbt and Superset can connect and run SQL on demand via the HiveServer2 protocol.
@@ -253,6 +257,7 @@ Then connect Superset to Spark Thrift Server:
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin123 | `minio_data` |
 | Spark Thrift Server | localhost:10000 | — | — |
 | Postgres | localhost:5433 | postgres / postgres | — |
+| Iceberg Catalog DB | internal only | iceberg / iceberg | `iceberg_db_data` |
 | Kafka | localhost:29092 | — | `kafka_data` |
 
 > Debezium connector is registered automatically on startup via the `connector-init` service.
