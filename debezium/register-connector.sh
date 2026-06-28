@@ -8,7 +8,7 @@ until curl -s http://connect:8083/connectors > /dev/null; do
 done
 
 curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" \
-  http://connect:8083/connectors/ \
+  http://connect:8083/connectors \
   -d @/register-postgres.json
 
 echo "Connector kaydedildi."
