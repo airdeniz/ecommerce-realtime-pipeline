@@ -7,7 +7,7 @@ WITH source AS (
         name,
         category,
         CAST(price AS DECIMAL(10,2)) AS price
-    FROM lakehouse.bronze.products
+    FROM {{ source('bronze', 'products') }}
 ),
 
 deduped AS (

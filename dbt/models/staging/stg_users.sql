@@ -7,7 +7,7 @@ WITH source AS (
         full_name,
         city,
         CAST(created_at AS TIMESTAMP) AS created_at
-    FROM lakehouse.bronze.users
+    FROM {{ source('bronze', 'users') }}
 ),
 
 deduped AS (

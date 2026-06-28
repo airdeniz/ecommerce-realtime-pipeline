@@ -8,7 +8,7 @@ WITH source AS (
         status,
         CAST(total_amount AS DECIMAL(12,2)) AS total_amount,
         CAST(created_at AS TIMESTAMP) AS created_at
-    FROM lakehouse.bronze.orders
+    FROM {{ source('bronze', 'orders') }}
     WHERE op IN ('c', 'u')
 ),
 

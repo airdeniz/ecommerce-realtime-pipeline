@@ -8,7 +8,7 @@ WITH source AS (
         product_id,
         quantity,
         CAST(unit_price AS DECIMAL(10,2)) AS unit_price
-    FROM lakehouse.bronze.order_items
+    FROM {{ source('bronze', 'order_items') }}
     WHERE op IN ('c', 'u', 'r')
 ),
 
