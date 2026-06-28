@@ -1,22 +1,29 @@
 import sys
+import os
 sys.stdout.reconfigure(line_buffering=True)
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col
 from pyspark.sql.types import StructType, StructField, StringType, LongType, DecimalType
 
+MINIO_USER = os.environ.get("MINIO_ROOT_USER", "minioadmin")
+MINIO_PASS = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin123")
+ICE_USER = os.environ.get("ICEBERG_DB_USER", "iceberg")
+ICE_PASS = os.environ.get("ICEBERG_DB_PASSWORD", "iceberg")
+ICE_DB = os.environ.get("ICEBERG_DB_NAME", "iceberg")
+
 spark = SparkSession.builder \
     .appName("ecommerce-orders-stream") \
     .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
     .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
     .config("spark.sql.catalog.lakehouse.catalog-impl", "org.apache.iceberg.jdbc.JdbcCatalog") \
-    .config("spark.sql.catalog.lakehouse.uri", "jdbc:postgresql://iceberg-db:5432/iceberg") \
-    .config("spark.sql.catalog.lakehouse.jdbc.user", "iceberg") \
-    .config("spark.sql.catalog.lakehouse.jdbc.password", "iceberg") \
+    .config("spark.sql.catalog.lakehouse.uri", f"jdbc:postgresql://iceberg-db:5432/{ICE_DB}") \
+    .config("spark.sql.catalog.lakehouse.jdbc.user", ICE_USER) \
+    .config("spark.sql.catalog.lakehouse.jdbc.password", ICE_PASS) \
     .config("spark.sql.catalog.lakehouse.warehouse", "s3a://lakehouse/") \
     .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-    .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \
+    .config("spark.hadoop.fs.s3a.access.key", MINIO_USER) \
+    .config("spark.hadoop.fs.s3a.secret.key", MINIO_PASS) \
     .config("spark.hadoop.fs.s3a.path.style.access", "true") \
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .getOrCreate()

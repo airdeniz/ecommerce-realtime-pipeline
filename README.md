@@ -244,15 +244,6 @@ the last run, and `MERGE INTO` upserts changed rows into the existing silver
 table. The `unique_key` would be the business key (e.g. `order_id`), and the
 `ts_ms` column already in bronze serves as the high-water mark.
 
-**MinIO bucket not auto-created.** After `docker compose down -v` the
-`lakehouse` bucket must be created manually
-(`docker exec ecom-minio mc mb local/lakehouse`). A dedicated `minio-init`
-service should handle this automatically on startup.
-
-**Hardcoded credentials.** MinIO and Iceberg DB credentials are inline in
-`orders_stream.py` and `docker-compose.yml`. In production these would come
-from environment variables or a secrets manager.
-
 ## Getting Started
 
 ### Prerequisites

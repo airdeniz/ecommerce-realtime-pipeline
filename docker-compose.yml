@@ -101,6 +101,23 @@ services:
     entrypoint: ["/bin/sh", "/register-connector.sh"]
     restart: "no"
 
+  minio-init:
+    image: minio/mc:latest
+    container_name: ecom-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/lakehouse &&
+      echo 'Bucket ready'
+      "
+    restart: "no"
+
   pyspark:
     build: ./pyspark
     container_name: ecom-pyspark
@@ -111,6 +128,14 @@ services:
         condition: service_healthy
       iceberg-db:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ICEBERG_DB_USER: ${ICEBERG_DB_USER}
+      ICEBERG_DB_PASSWORD: ${ICEBERG_DB_PASSWORD}
+      ICEBERG_DB_NAME: ${ICEBERG_DB_NAME}
     command: /opt/spark/bin/spark-submit /app/orders_stream.py
 
   spark-thrift:
@@ -123,9 +148,17 @@ services:
         condition: service_healthy
       iceberg-db:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     ports:
       - "10000:10000"
       - "4041:4040"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ICEBERG_DB_USER: ${ICEBERG_DB_USER}
+      ICEBERG_DB_PASSWORD: ${ICEBERG_DB_PASSWORD}
+      ICEBERG_DB_NAME: ${ICEBERG_DB_NAME}
     command: >
       bash -c "/opt/spark/sbin/start-thriftserver.sh
       --driver-memory 2g
@@ -133,13 +166,13 @@ services:
       --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
       --conf spark.sql.catalog.lakehouse=org.apache.iceberg.spark.SparkCatalog
       --conf spark.sql.catalog.lakehouse.catalog-impl=org.apache.iceberg.jdbc.JdbcCatalog
-      --conf spark.sql.catalog.lakehouse.uri=jdbc:postgresql://iceberg-db:5432/iceberg
-      --conf spark.sql.catalog.lakehouse.jdbc.user=iceberg
-      --conf spark.sql.catalog.lakehouse.jdbc.password=iceberg
+      --conf spark.sql.catalog.lakehouse.uri=jdbc:postgresql://iceberg-db:5432/$${ICEBERG_DB_NAME}
+      --conf spark.sql.catalog.lakehouse.jdbc.user=$${ICEBERG_DB_USER}
+      --conf spark.sql.catalog.lakehouse.jdbc.password=$${ICEBERG_DB_PASSWORD}
       --conf spark.sql.catalog.lakehouse.warehouse=s3a://lakehouse/
       --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
-      --conf spark.hadoop.fs.s3a.access.key=minioadmin
-      --conf spark.hadoop.fs.s3a.secret.key=minioadmin123
+      --conf spark.hadoop.fs.s3a.access.key=$${MINIO_ROOT_USER}
+      --conf spark.hadoop.fs.s3a.secret.key=$${MINIO_ROOT_PASSWORD}
       --conf spark.hadoop.fs.s3a.path.style.access=true
       --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
       && tail -f /opt/spark/logs/*"
@@ -260,13 +293,13 @@ services:
     image: postgres:16
     container_name: ecom-iceberg-db
     environment:
-      POSTGRES_USER: iceberg
-      POSTGRES_PASSWORD: iceberg
-      POSTGRES_DB: iceberg
+      POSTGRES_USER: ${ICEBERG_DB_USER}
+      POSTGRES_PASSWORD: ${ICEBERG_DB_PASSWORD}
+      POSTGRES_DB: ${ICEBERG_DB_NAME}
     volumes:
       - iceberg_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U iceberg"]
+      test: ["CMD-SHELL", "pg_isready -U ${ICEBERG_DB_USER}"]
       interval: 5s
       timeout: 5s
       retries: 10
