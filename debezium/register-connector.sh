@@ -1,9 +1,9 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 echo "Debezium connector kaydediliyor..."
 
 until curl -s http://connect:8083/connectors > /dev/null; do
-  echo "Connect servisi hazır değil, bekleniyor..."
+  echo "Connect servisi hazÄ±r deÄŸil, bekleniyor..."
   sleep 5
 done
 
