@@ -1,0 +1,39 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: >
+      Append-only CDC landing zone written by the PySpark streaming job.
+      Holds every version of each row (one per Debezium event), so keys are
+      NOT unique here — deduplication happens in the staging layer using the
+      WAL LSN. The catalog is embedded in `schema` because dbt-spark does not
+      allow a separate `database`/catalog field.
+    schema: lakehouse.bronze
+    tables:
+      - name: orders
+        description: Raw order change events (CREATED / PAID / CANCELLED lifecycle).
+        columns:
+          - name: order_id
+            description: Order identifier (not unique in bronze — multiple versions).
+            data_tests:
+              - not_null
+          - name: lsn
+            description: Postgres WAL Log Sequence Number — canonical event ordering key.
+      - name: order_items
+        description: Raw order-item change events.
+        columns:
+          - name: order_item_id
+            data_tests:
+              - not_null
+      - name: products
+        description: Raw product change events (mostly initial snapshot).
+        columns:
+          - name: product_id
+            data_tests:
+              - not_null
+      - name: users
+        description: Raw user change events (mostly initial snapshot).
+        columns:
+          - name: user_id
+            data_tests:
+              - not_null

@@ -1,0 +1,85 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: One row per order — latest version selected by WAL LSN.
+    columns:
+      - name: order_id
+        description: Unique order identifier.
+        data_tests:
+          - unique
+          - not_null
+      - name: user_id
+        description: Customer who placed the order.
+        data_tests:
+          - not_null
+      - name: status
+        description: Latest order status in the CDC stream.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['CREATED', 'PAID', 'CANCELLED']
+      - name: total_amount
+        data_tests:
+          - not_null
+      - name: created_at
+        data_tests:
+          - not_null
+
+  - name: stg_users
+    description: One row per user (deduped).
+    columns:
+      - name: user_id
+        data_tests:
+          - unique
+          - not_null
+      - name: full_name
+        data_tests:
+          - not_null
+      - name: city
+        data_tests:
+          - not_null
+
+  - name: stg_products
+    description: One row per product (deduped).
+    columns:
+      - name: product_id
+        data_tests:
+          - unique
+          - not_null
+      - name: name
+        data_tests:
+          - not_null
+      - name: category
+        data_tests:
+          - not_null
+      - name: price
+        data_tests:
+          - not_null
+
+  - name: stg_order_items
+    description: One row per order line (deduped).
+    columns:
+      - name: order_item_id
+        data_tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: Parent order. Every line belongs to an inserted order.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: product_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_products')
+              field: product_id
+      - name: quantity
+        data_tests:
+          - not_null
+      - name: unit_price
+        data_tests:
+          - not_null

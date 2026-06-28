@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: mart_daily_revenue
+    description: Daily revenue, order counts, cancellations and unique customers.
+    columns:
+      - name: order_date
+        description: Calendar day (one row per day).
+        data_tests:
+          - unique
+          - not_null
+      - name: total_orders
+        data_tests:
+          - not_null
+      - name: total_revenue
+        description: Sum of paid_amount for the day.
+        data_tests:
+          - not_null
+      - name: cancelled_orders
+        data_tests:
+          - not_null
+      - name: unique_customers
+        data_tests:
+          - not_null
+
+  - name: mart_sales_by_category
+    description: Revenue, quantity and order counts aggregated by product category.
+    columns:
+      - name: category
+        description: Product category (one row per category).
+        data_tests:
+          - unique
+          - not_null
+      - name: total_orders
+        data_tests:
+          - not_null
+      - name: total_quantity
+        data_tests:
+          - not_null
+      - name: total_revenue
+        data_tests:
+          - not_null

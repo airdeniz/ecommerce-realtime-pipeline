@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: core_orders
+    description: >
+      Business-ready orders, enriched with user attributes. CREATED orders are
+      excluded — only completed (PAID / CANCELLED) orders remain.
+    columns:
+      - name: order_id
+        data_tests:
+          - unique
+          - not_null
+      - name: user_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_users')
+              field: user_id
+      - name: status
+        description: Completed order status only.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['PAID', 'CANCELLED']
+      - name: paid_amount
+        description: total_amount when PAID, else 0.
+        data_tests:
+          - not_null
+      - name: is_cancelled
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+
+  - name: core_order_items
+    description: Order lines enriched with product attributes and line totals.
+    columns:
+      - name: order_item_id
+        data_tests:
+          - unique
+          - not_null
+      - name: order_id
+        description: >
+          Parent order. Points to stg_orders (not core_orders) because lines
+          also exist for CREATED orders that core_orders filters out.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_orders')
+              field: order_id
+      - name: product_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_products')
+              field: product_id
+      - name: line_total
+        description: quantity * unit_price.
+        data_tests:
+          - not_null
