@@ -162,10 +162,10 @@ Connected to Spark Thrift via `hive://spark-thrift:10000`. Reads from `ecommerce
 
 | Layer | Schema | Storage | Updated By |
 |-------|--------|---------|------------|
-| Bronze | `lakehouse.bronze` | Iceberg (MinIO) | PySpark streaming (continuous) |
-| Staging | `ecommerce_staging` | Iceberg views | dbt (nightly) |
-| Silver | `ecommerce_silver` | Iceberg tables | dbt (nightly) |
-| Gold | `ecommerce_gold` | Iceberg tables | dbt (nightly) |
+| Bronze | `lakehouse.bronze` | Iceberg (MinIO, JDBC catalog) | PySpark streaming (continuous) |
+| Staging | `ecommerce_staging` | Spark views (in-memory) | dbt (nightly) |
+| Silver | `lakehouse.silver` | Iceberg (MinIO, JDBC catalog) | dbt (nightly) |
+| Gold | `lakehouse.gold` | Iceberg (MinIO, JDBC catalog) | dbt (nightly) |
 
 ## Handling Updates: CDC Event Ordering
 

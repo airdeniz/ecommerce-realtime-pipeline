@@ -7,14 +7,27 @@ profile: ecommerce
 model-paths: ["models"]
 test-paths: ["tests"]
 
+# Iceberg JDBC catalog'da namespace otomatik olusmuyor; ilk run'dan once acikca
+# yaratiyoruz. IF NOT EXISTS oldugu icin sonraki run'larda no-op.
+on-run-start:
+  - "CREATE NAMESPACE IF NOT EXISTS lakehouse.silver"
+  - "CREATE NAMESPACE IF NOT EXISTS lakehouse.gold"
+
 models:
   ecommerce:
     staging:
+      # Staging views default Spark catalog'da kalir; her dbt run'da yeniden
+      # olusturulduklari icin (DROP/CREATE VIEW) thrift restart'i sorun degil.
       +materialized: view
       +schema: staging
     core:
+      # Silver tablolari Iceberg JDBC catalog'unda -> thrift restart'ina dayanikli,
+      # ACID, time travel. Schema 'lakehouse.silver' three-part name uretir.
       +materialized: table
-      +schema: silver
+      +file_format: iceberg
+      +schema: lakehouse.silver
     mart:
+      # Gold tablolari da Iceberg'de.
       +materialized: table
-      +schema: gold
+      +file_format: iceberg
+      +schema: lakehouse.gold
