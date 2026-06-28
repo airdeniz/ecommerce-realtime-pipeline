@@ -163,6 +163,46 @@ Connected to Spark Thrift via `hive://spark-thrift:10000`. Reads from `ecommerce
 | Silver | `ecommerce_silver` | Iceberg tables | dbt (nightly) |
 | Gold | `ecommerce_gold` | Iceberg tables | dbt (nightly) |
 
+## Handling Updates: CDC Event Ordering
+
+In a CDC pipeline a single row changes over time. An order moves
+`CREATED → PAID` (or `CANCELLED`), so Debezium emits **several events for the
+same `order_id`**. Bronze is append-only by design, so it stores every version
+of the row — the silver layer is responsible for collapsing them down to the
+latest state. The hard part is deciding which version *is* the latest.
+
+A naive approach orders by `created_at`:
+
+```sql
+ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY created_at DESC)
+```
+
+This is **wrong** here. `created_at` is set once at INSERT (`DEFAULT now()`)
+and is never touched on UPDATE — correct semantics for a *creation* timestamp.
+So the `CREATED` and `PAID` rows of the same order carry an identical
+`created_at`, the ordering becomes non-deterministic, and `ROW_NUMBER` can keep
+the stale `CREATED` row. Downstream, `core_orders` filters out `CREATED`
+orders — so those orders silently disappear and **revenue is undercounted**.
+
+The fix is to order by the database's own source of truth for change order: the
+Postgres **WAL LSN** (Log Sequence Number). Every committed change gets a
+unique, monotonically increasing LSN, exposed by Debezium in
+`payload.source.lsn`. The streaming job captures it (plus `source.ts_ms` as a
+tiebreaker) into bronze, and staging dedups on it:
+
+```sql
+ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY lsn DESC, ts_ms DESC)
+```
+
+| order_id | op | status  | lsn      | kept |
+|----------|----|---------|----------|------|
+| 5        | c  | CREATED | 24023000 |      |
+| 5        | u  | PAID    | 24023128 | ✓    |
+
+This is the canonical way to order CDC events. It keeps the source schema
+untouched — no need to add an `updated_at` column to the OLTP database, which
+you often cannot modify in production anyway.
+
 ## Project Phases
 
 - [x] Phase 1 — CDC Pipeline: Postgres + Debezium + Kafka + Order Generator
