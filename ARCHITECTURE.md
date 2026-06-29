@@ -74,6 +74,17 @@ layer — interpretation belongs upstream in staging/silver. The dedup key is
 kept as a separate typed column (not parsed from JSON each time) so
 `PARTITION BY` stays clean and fast.
 
+**The ingest must not re-parse with a fixed schema either.** A subtle trap:
+even with a JSON `raw_payload` column, if the streaming job parsed the Kafka
+message with a fixed `StructType` first (`from_json`) and *then* re-serialized
+it, any field missing from that `StructType` — including a newly added source
+column — would be dropped during the parse, before it ever reached
+`raw_payload`. So the streaming job deliberately does **not** parse the message
+into a struct. It pulls only the fields it needs (`op`, `lsn`, `ts_ms`, the
+dedup key) via `get_json_object` JSON paths and stores `payload.after` /
+`payload.before` as the raw string. Nothing is schema-bound at ingest, so a new
+column genuinely flows through to bronze untouched.
+
 *Without bronze, today nothing breaks* — silver and gold tables live in their
 own Parquet files, reports keep working. But tomorrow the damage starts:
 

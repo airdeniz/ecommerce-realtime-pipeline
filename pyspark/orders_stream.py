@@ -3,8 +3,7 @@ import os
 sys.stdout.reconfigure(line_buffering=True)
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, coalesce, to_json, get_json_object
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DecimalType
+from pyspark.sql.functions import col, coalesce, get_json_object
 
 MINIO_USER = os.environ.get("MINIO_ROOT_USER", "minioadmin")
 MINIO_PASS = os.environ.get("MINIO_ROOT_PASSWORD", "minioadmin123")
@@ -29,84 +28,6 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
-
-# Debezium source metadata: lsn = WAL log sequence number (monoton artan,
-# her degisiklik icin tekil -> CDC olaylarini siralamanin kanonik yolu).
-# ts_ms = commit zamani (lsn yoksa yedek siralama anahtari).
-source_schema = StructType([
-    StructField("lsn", LongType()),
-    StructField("ts_ms", LongType()),
-])
-
-# ORDERS
-order_schema = StructType([
-    StructField("order_id", LongType()),
-    StructField("user_id", LongType()),
-    StructField("status", StringType()),
-    StructField("total_amount", StringType()),
-    StructField("created_at", StringType()),
-])
-
-debezium_order_schema = StructType([
-    StructField("payload", StructType([
-        StructField("before", order_schema),
-        StructField("after", order_schema),
-        StructField("source", source_schema),
-        StructField("op", StringType()),
-    ]))
-])
-
-# USERS
-user_schema = StructType([
-    StructField("user_id", LongType()),
-    StructField("full_name", StringType()),
-    StructField("city", StringType()),
-    StructField("created_at", StringType()),
-])
-
-debezium_user_schema = StructType([
-    StructField("payload", StructType([
-        StructField("before", user_schema),
-        StructField("after", user_schema),
-        StructField("source", source_schema),
-        StructField("op", StringType()),
-    ]))
-])
-
-# PRODUCTS
-product_schema = StructType([
-    StructField("product_id", LongType()),
-    StructField("name", StringType()),
-    StructField("category", StringType()),
-    StructField("price", StringType()),
-])
-
-debezium_product_schema = StructType([
-    StructField("payload", StructType([
-        StructField("before", product_schema),
-        StructField("after", product_schema),
-        StructField("source", source_schema),
-        StructField("op", StringType()),
-    ]))
-])
-
-# ORDER ITEMS
-order_item_schema = StructType([
-    StructField("order_item_id", LongType()),
-    StructField("order_id", LongType()),
-    StructField("product_id", LongType()),
-    StructField("quantity", LongType()),
-    StructField("unit_price", StringType()),
-])
-
-debezium_order_item_schema = StructType([
-    StructField("payload", StructType([
-        StructField("before", order_item_schema),
-        StructField("after", order_item_schema),
-        StructField("source", source_schema),
-        StructField("op", StringType()),
-    ]))
-])
 
 # Iceberg bronze tablolari: HAM (raw) payload yaklasimi.
 # Her tablo ayni minimal sema:
@@ -160,30 +81,43 @@ spark.sql("""
 #   - op/lsn/ts_ms: CDC metadata (siralama + dedup)
 #   - pk: dedup partition anahtari; delete'te after NULL oldugu icin
 #         COALESCE(after.<pk>, before.<pk>) ile alinir
-#   - raw_payload: payload.after'in TAMAMI JSON string (delete'te after NULL
-#         oldugundan before kullanilir). Tum is kolonlari burada; yeni kolon
-#         eklendiginde otomatik yakalanir.
-def make_stream(topic, schema, pk):
+#   - raw_payload: payload.after'in TAMAMI ham JSON string (delete'te after NULL
+#         oldugundan before kullanilir).
+#
+# ONEMLI: Kafka value'su HIC StructType ile parse EDILMIYOR. Onceden sabit
+# semayla (from_json) parse etseydik, semada olmayan yeni bir kolon (orn.
+# discount) parse sirasinda DUSER ve raw_payload'a hic giremezdi -> "her seyi
+# yakala" bozulurdu. Bunun yerine get_json_object ile JSON path'lerden gereken
+# alanlari ham olarak cekiyoruz; after/before'i da ham JSON string olarak
+# aliyoruz. Boylece kaynaga eklenen her yeni kolon, sema degisikligi olmadan
+# otomatik raw_payload'da yer alir.
+def make_stream(topic, pk):
     return spark.readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", "kafka:9092") \
         .option("subscribe", topic) \
         .option("startingOffsets", "earliest") \
         .load() \
-        .select(from_json(col("value").cast("string"), schema).alias("data")) \
+        .select(col("value").cast("string").alias("v")) \
         .select(
-            col("data.payload.op").alias("op"),
-            col("data.payload.source.lsn").alias("lsn"),
-            col("data.payload.source.ts_ms").alias("ts_ms"),
-            coalesce(col(f"data.payload.after.{pk}"), col(f"data.payload.before.{pk}")).alias(pk),
-            coalesce(to_json(col("data.payload.after")), to_json(col("data.payload.before"))).alias("raw_payload"),
+            get_json_object(col("v"), "$.payload.op").alias("op"),
+            get_json_object(col("v"), "$.payload.source.lsn").cast("long").alias("lsn"),
+            get_json_object(col("v"), "$.payload.source.ts_ms").cast("long").alias("ts_ms"),
+            coalesce(
+                get_json_object(col("v"), f"$.payload.after.{pk}"),
+                get_json_object(col("v"), f"$.payload.before.{pk}"),
+            ).cast("long").alias(pk),
+            coalesce(
+                get_json_object(col("v"), "$.payload.after"),
+                get_json_object(col("v"), "$.payload.before"),
+            ).alias("raw_payload"),
         ) \
         .filter(col("op").isin("c", "u", "r", "d"))
 
-orders_df = make_stream("ecom.public.orders", debezium_order_schema, "order_id")
-users_df = make_stream("ecom.public.users", debezium_user_schema, "user_id")
-products_df = make_stream("ecom.public.products", debezium_product_schema, "product_id")
-order_items_df = make_stream("ecom.public.order_items", debezium_order_item_schema, "order_item_id")
+orders_df = make_stream("ecom.public.orders", "order_id")
+users_df = make_stream("ecom.public.users", "user_id")
+products_df = make_stream("ecom.public.products", "product_id")
+order_items_df = make_stream("ecom.public.order_items", "order_item_id")
 
 def write_to_iceberg(table_name):
     def inner(batch_df, batch_id):
