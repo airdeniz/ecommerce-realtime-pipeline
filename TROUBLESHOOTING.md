@@ -181,6 +181,41 @@ docker compose up -d <service>
 Note this can remove your project's own images if its containers are stopped —
 they'll be rebuilt automatically on the next `up`. (Reclaimed ~6.9 GB once.)
 
+### Partial reset: Postgres wiped but Kafka / checkpoints kept (stream stalls)
+**Symptom:** The generator writes to Postgres (row count climbs, e.g. max
+order_id grows) but PySpark logs no new `Batch N` lines and bronze stays frozen
+at an old count. The Debezium connector reports `RUNNING`. Querying the Kafka
+topic offset shows it stuck at the old high-water mark; reading the last
+messages shows old order_ids and yesterday's timestamps, not the new rows.
+**Cause:** The volumes got reset unevenly. Postgres's volume was wiped (fresh
+DB, low order_ids, new LSN space) while Kafka's `kafka_data` and the PySpark
+checkpoints on MinIO survived. Three pieces now disagree:
+1. Debezium's replication slot remembers an old LSN from the previous DB, so it
+   ignores the new (low-LSN) changes from the fresh Postgres — no new events
+   reach Kafka even though the connector is "running".
+2. Kafka still holds the old messages, so its end offset doesn't move.
+3. PySpark's checkpoint points at that same old offset, sees nothing newer, and
+   never triggers a batch.
+**How to confirm:**
+```bash
+# source is producing?
+docker exec ecom-postgres psql -U postgres -d ecommerce -c "SELECT COUNT(*), MAX(order_id) FROM orders;"
+# kafka end offset (stuck if it doesn't grow)
+docker exec ecom-kafka kafka-run-class kafka.tools.GetOffsetShell --broker-list kafka:9092 --topic ecom.public.orders
+# last messages — old ids / old timestamps reveal the mismatch
+docker exec ecom-kafka kafka-console-consumer --bootstrap-server kafka:9092 --topic ecom.public.orders --offset <end-3> --partition 0 --max-messages 3 --timeout-ms 8000
+```
+**Fix:** Reset everything together so all state lines up again:
+```bash
+docker compose down -v   # wipes Postgres, Kafka, MinIO, checkpoints
+docker compose up -d      # fresh snapshot, empty Kafka, clean checkpoints
+```
+**Lesson:** Postgres, Kafka, and the PySpark checkpoint hold *coupled* state.
+Resetting one without the others breaks CDC. Either reset all of them
+(`down -v`) or none. In production this is why slot management and coordinated
+recovery matter — you can't restore one component to an old point in time in
+isolation.
+
 ### WSL2 / Docker Desktop crashes (Windows)
 - Recover with `wsl --shutdown`, then restart Docker Desktop.
 - Named volumes survive, so no data loss.
