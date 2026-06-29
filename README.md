@@ -25,6 +25,7 @@ flowchart LR
     PG -->|CDC| DBZ[Debezium]
     DBZ -->|JSON events| KAFKA[Kafka]
     KAFKA -->|stream| SPARK[PySpark]
+    KAFKA -->|inventory stream| STOCK[Stock Monitor<br/>low-stock alerts]
     SPARK -->|Iceberg write| MINIO[(MinIO<br/>Lakehouse)]
     MINIO -->|read| THRIFT[Spark Thrift Server]
     THRIFT --> DBT[dbt Core]
@@ -55,6 +56,12 @@ flowchart TB
         S[PySpark Structured Streaming<br/>orders_stream.py]
         K -->|subscribe earliest| S
         S -->|parse JSON, filter op c/u/r| S
+    end
+
+    subgraph CONSUMERS["Other Consumers — Kafka fan-out"]
+        SM[Stock Monitor<br/>stock_monitor.py<br/>group: stock-monitor-service]
+        K -->|subscribe inventory topic| SM
+        SM -->|stock_qty below threshold| ALERT[Low-stock alert<br/>Slack / email in prod]
     end
 
     subgraph LAKEHOUSE["Lakehouse - MinIO"]
