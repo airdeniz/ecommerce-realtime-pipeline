@@ -175,6 +175,31 @@ Runs `dbt_pipeline` DAG every night at 02:00. Two tasks: `dbt_run` → `dbt_test
 Connected to Spark Thrift via `hive://spark-thrift:10000`. Reads from `lakehouse.gold` tables.
 *Why:* Closes the loop — business users see charts, not SQL. Metadata stored in a dedicated Postgres database (`superset-db`) for persistence across restarts.
 
+## Data Format Journey
+
+The same record changes representation many times between the generator and the
+dashboard. Two transformations matter most: where it becomes **JSON** (Debezium)
+and where it becomes **Parquet** (PySpark/Iceberg). Tracing one value —
+`total_amount = 4799.20` — through every stage:
+
+| # | Stage | Format | Example |
+|---|-------|--------|---------|
+| 1 | `generate.py` | Python objects | `total = 4799.20` (`float`) |
+| 2 | Postgres table (heap) | Typed SQL row | `NUMERIC(12,2)` on disk |
+| 3 | WAL | Binary log | `00 00 01 6A 3F 80 ...` (unreadable) |
+| 4 | pgoutput plugin | Decoded binary message | row-level change, still binary |
+| 5 | Debezium | **JSON envelope** | `{"payload":{"after":{...},"op":"c","source":{"lsn":...}}}` |
+| 6 | Kafka topic | UTF-8 JSON bytes | byte array (Kafka is content-agnostic) |
+| 7 | PySpark | DataFrame | `from_json` + `StructType` → typed columns |
+| 8 | Iceberg bronze | **Parquet** | columnar binary in MinIO + Iceberg metadata |
+| 9 | dbt silver/gold | Parquet (transformed) | cleaned, joined, aggregated |
+| 10 | Superset | SQL result set | rows fetched via Thrift → rendered as charts |
+
+Note: the WAL itself is binary — `pgoutput` decodes it to a structured message
+*inside Postgres*, but the conversion to JSON only happens at the Debezium layer
+via `JsonConverter`. (`decimal.handling.mode: string` keeps `total_amount` as a
+string in the JSON to avoid floating-point precision loss in transit.)
+
 ## Data Layers
 
 | Layer | Schema | Storage | Updated By |
