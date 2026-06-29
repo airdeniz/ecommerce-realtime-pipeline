@@ -16,6 +16,16 @@ Tasarim notlari:
 
 import os
 import re
+import logging
+
+# MCP stdio modunda stdout YALNIZCA protokol mesajlari icindir. PyHive ve diger
+# kutuphaneler stdout'a/loglara satir basarsa (orn "USE default") protokol
+# bozulabilir. Bu yuzden tum logging'i stderr'e/sustur: root logger'i WARNING'e
+# cek ve PyHive'in gurultusunu kapat.
+logging.basicConfig(level=logging.WARNING)
+for noisy in ("pyhive", "thrift", "py4j", "urllib3"):
+    logging.getLogger(noisy).setLevel(logging.ERROR)
+
 from mcp.server.fastmcp import FastMCP
 from pyhive import hive
 
