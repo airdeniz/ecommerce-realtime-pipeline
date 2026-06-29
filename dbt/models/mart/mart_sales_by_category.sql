@@ -16,6 +16,7 @@ final AS (
     LEFT JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'PAID'
       AND o.is_deleted = FALSE
+      AND oi.is_deleted = FALSE
     GROUP BY oi.category
 )
 

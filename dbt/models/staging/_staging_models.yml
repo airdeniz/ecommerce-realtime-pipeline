@@ -45,6 +45,10 @@ models:
       - name: city
         data_tests:
           - not_null
+      - name: is_deleted
+        description: True when latest event is a delete (op = 'd'). Soft delete.
+        data_tests:
+          - not_null
 
   - name: stg_products
     description: One row per product (deduped).
@@ -60,6 +64,10 @@ models:
         data_tests:
           - not_null
       - name: price
+        data_tests:
+          - not_null
+      - name: is_deleted
+        description: True when latest event is a delete (op = 'd'). Soft delete.
         data_tests:
           - not_null
 
@@ -94,5 +102,9 @@ models:
         data_tests:
           - not_null
       - name: unit_price
+        data_tests:
+          - not_null
+      - name: is_deleted
+        description: True when latest event is a delete (op = 'd'). Soft delete.
         data_tests:
           - not_null

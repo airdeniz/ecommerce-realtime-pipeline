@@ -329,13 +329,17 @@ that already existed when CDC started), `c` (insert), `u` (update), `d`
   deleted in Postgres, Debezium emits `op = 'd'` with the row's values in
   `payload.before` (and `payload.after` null). The streaming job reads both
   `before` and `after` and coalesces them, so the delete is captured with its
-  key intact. Downstream, instead of physically removing the row, the model
-  sets `is_deleted = true` and keeps it. This is intentional: the lakehouse
-  preserves history for audit and analytics even after the source row is gone.
-  Marts then exclude `is_deleted = true` rows from revenue and sales metrics,
-  so deleted orders stay queryable without polluting business numbers.
-  (`tombstones.on.delete` is `false` on the connector, so a delete is a single
-  event with no trailing null tombstone.)
+  key intact. This is applied uniformly to **all CDC tables** (orders,
+  order_items, users, products) — not just orders — so the delete policy is
+  consistent across the warehouse. Downstream, instead of physically removing
+  the row, every staging model sets `is_deleted = true` and keeps it. This is
+  intentional: the lakehouse preserves history for audit and analytics even
+  after the source row is gone. Marts then exclude `is_deleted = true` rows
+  from revenue and sales metrics, so deleted records stay queryable without
+  polluting business numbers. (`tombstones.on.delete` is `false` on the
+  connector, so a delete is a single event with no trailing null tombstone.)
+  The generator periodically deletes an old cancelled order so these `op = 'd'`
+  events actually flow through the pipeline.
 
 ### Streaming Referential Consistency
 

@@ -9,7 +9,7 @@ WITH source AS (
         quantity,
         CAST(unit_price AS DECIMAL(10,2)) AS unit_price
     FROM {{ source('bronze', 'order_items') }}
-    WHERE op IN ('c', 'u', 'r')
+    WHERE op IN ('c', 'u', 'r', 'd')
 ),
 
 deduped AS (
@@ -26,6 +26,7 @@ SELECT
     order_id,
     product_id,
     quantity,
-    unit_price
+    unit_price,
+    CASE WHEN op = 'd' THEN TRUE ELSE FALSE END AS is_deleted
 FROM deduped
 WHERE rn = 1

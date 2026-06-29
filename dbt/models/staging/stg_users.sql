@@ -23,6 +23,7 @@ SELECT
     user_id,
     full_name,
     city,
-    created_at
+    created_at,
+    CASE WHEN op = 'd' THEN TRUE ELSE FALSE END AS is_deleted
 FROM deduped
 WHERE rn = 1

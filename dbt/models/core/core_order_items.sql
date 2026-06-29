@@ -15,7 +15,8 @@ final AS (
         p.category,
         oi.quantity,
         oi.unit_price,
-        oi.quantity * oi.unit_price AS line_total
+        oi.quantity * oi.unit_price AS line_total,
+        oi.is_deleted
     FROM order_items oi
     LEFT JOIN products p ON oi.product_id = p.product_id
 )

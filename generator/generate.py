@@ -52,6 +52,22 @@ def main():
             cur.execute("UPDATE orders SET status = 'CANCELLED' WHERE order_id = %s", (order_id,))
 
         print(f"Siparis {order_id} | kullanici {user_id} | tutar {round(total,2)} | {len(items)} kalem")
+
+        # Ara sira (~%5) eski bir CANCELLED siparisi siliyoruz. Gercek hayatta
+        # iptal edilen siparisler bir sure sonra OLTP'den temizlenebilir.
+        # Bu, CDC delete (op='d') olaylarinin pipeline boyunca akmasini saglar;
+        # downstream'de is_deleted=true olarak yakalanir (soft delete).
+        if random.random() < 0.05:
+            cur.execute(
+                "SELECT order_id FROM orders WHERE status = 'CANCELLED' ORDER BY random() LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row:
+                silinecek = row[0]
+                cur.execute("DELETE FROM order_items WHERE order_id = %s", (silinecek,))
+                cur.execute("DELETE FROM orders WHERE order_id = %s", (silinecek,))
+                print(f"  -> Siparis {silinecek} silindi (iptal temizligi)")
+
         time.sleep(random.uniform(5.0, 7.0))
 
 if __name__ == "__main__":

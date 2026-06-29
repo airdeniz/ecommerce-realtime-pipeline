@@ -23,6 +23,7 @@ SELECT
     product_id,
     name,
     category,
-    price
+    price,
+    CASE WHEN op = 'd' THEN TRUE ELSE FALSE END AS is_deleted
 FROM deduped
 WHERE rn = 1

@@ -71,3 +71,11 @@ models:
         description: quantity * unit_price.
         data_tests:
           - not_null
+      - name: is_deleted
+        description: >
+          True when the most recent event for this line was a delete (op = 'd').
+          Soft delete — kept for audit, excluded from sales marts.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
