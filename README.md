@@ -499,3 +499,9 @@ Then connect Superset to Spark Thrift Server:
 
 > Debezium connector is registered automatically on startup via the `connector-init` service.
 > `docker compose down` (without `-v`) preserves all data via named volumes.
+
+## Troubleshooting
+
+Common problems and their fixes (CDC, Iceberg, Spark, dbt, the stock monitor,
+Docker, and the cross-machine Git workflow) are documented in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
