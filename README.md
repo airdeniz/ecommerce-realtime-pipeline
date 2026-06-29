@@ -297,6 +297,29 @@ expected tail lag (`warn_if: ">0"`) and only **fail** on structural breakage
 (`error_if: ">500"`), instead of demanding perfect consistency on a moving
 target.
 
+**A subtler variant: cross-table snapshot skew.** dbt reads its source tables
+at slightly different moments within a single run — `orders` might be read at
+02:00:00 and `order_items` at 02:00:30. Iceberg's **snapshot isolation**
+guarantees each table is internally consistent (dbt sees one frozen snapshot
+per table, even if PySpark keeps writing during the run), but the two
+snapshots are taken 30 seconds apart. So an `order_item` read at 02:00:30 may
+reference an `order_id` that wasn't yet in the `orders` snapshot from 02:00:00.
+The same `warn_if`/`error_if` thresholds absorb this, and the orphan resolves
+on the next run once the parent order is in bronze.
+
+*Production solution (not yet implemented):* read **all** source tables at one
+fixed cutoff using Iceberg time travel — `SELECT ... FROM orders TIMESTAMP AS OF
+'{{ cutoff }}'` with the same `cutoff` injected into every staging model at the
+start of the dbt run (e.g. via a dbt var set to the run's start time). This
+gives a single consistent cross-table cut: referential integrity is guaranteed,
+the run is reproducible (same cutoff → same result), and it's auditable (every
+report maps to a known point in time). The trade-offs are minor for a nightly
+batch: data after the cutoff waits for the next run, every model must thread the
+cutoff parameter, and the snapshot must still exist (retention must outlast the
+cutoff). We chose to document this rather than implement it for now, since the
+threshold-based approach is sufficient at the current scale and the
+point-in-time read adds parameter-threading complexity across the model graph.
+
 ## Multiple Consumers: The Stock Monitoring Service
 
 The same CDC stream can feed more than one consumer. The analytics pipeline
