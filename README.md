@@ -32,9 +32,7 @@ flowchart LR
     DBT -->|transform| MINIO
     AIRFLOW[Airflow<br/>nightly DAG] -.->|trigger| DBT
     THRIFT --> SUPERSET[Superset Dashboard]
-    subgraph MON["Monitoring — not in data flow"]
-        CONSOLE[Redpanda Console]
-    end
+    CONSOLE[Redpanda Console]
     KAFKA -.->|monitored by| CONSOLE
 ```
 
