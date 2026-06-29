@@ -9,11 +9,15 @@ WITH source AS (
         CAST(total_amount AS DECIMAL(12,2)) AS total_amount,
         CAST(created_at AS TIMESTAMP) AS created_at
     FROM {{ source('bronze', 'orders') }}
-    WHERE op IN ('c', 'u')
+    -- r = ilk snapshot (mevcut kayitlar), c = create, u = update, d = delete.
+    -- Hepsini aliyoruz: snapshot baslangic verisidir, delete ise asagida
+    -- is_deleted'a cevrilir (hard delete yerine soft delete).
+    WHERE op IN ('c', 'u', 'r', 'd')
 ),
 
--- Bir order_id icin CREATED ve PAID/CANCELLED satirlari ayni created_at'e
--- sahip oldugundan, en guncel versiyonu Debezium WAL LSN'ine gore seciyoruz.
+-- Bir order_id icin birden fazla event (CREATED, PAID, hatta DELETE) ayni
+-- created_at'e sahip olabildiginden, en guncel versiyonu Debezium WAL LSN'ine
+-- gore seciyoruz. Eger en guncel event delete ise o kazanir ve is_deleted=true olur.
 deduped AS (
     SELECT *,
         ROW_NUMBER() OVER (
@@ -28,6 +32,7 @@ SELECT
     user_id,
     status,
     total_amount,
-    created_at
+    created_at,
+    CASE WHEN op = 'd' THEN TRUE ELSE FALSE END AS is_deleted
 FROM deduped
 WHERE rn = 1

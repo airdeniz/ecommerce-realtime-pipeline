@@ -25,6 +25,12 @@ models:
       - name: created_at
         data_tests:
           - not_null
+      - name: is_deleted
+        description: >
+          True when the latest event for this order is a Debezium delete
+          (op = 'd'). Soft delete — row retained for audit.
+        data_tests:
+          - not_null
 
   - name: stg_users
     description: One row per user (deduped).

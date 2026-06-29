@@ -10,6 +10,8 @@ daily AS (
         SUM(is_cancelled) AS cancelled_orders,
         COUNT(DISTINCT user_id) AS unique_customers
     FROM orders
+    -- Silinen siparisler (soft delete) metriklere dahil edilmez.
+    WHERE is_deleted = FALSE
     GROUP BY DATE(created_at)
 )
 

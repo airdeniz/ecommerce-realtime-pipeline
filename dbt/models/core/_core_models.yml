@@ -3,8 +3,9 @@ version: 2
 models:
   - name: core_orders
     description: >
-      Business-ready orders, enriched with user attributes. CREATED orders are
-      excluded — only completed (PAID / CANCELLED) orders remain.
+      Business-ready orders, enriched with user attributes. All lifecycle
+      statuses are kept (CREATED, PAID, CANCELLED). Deleted source rows are
+      retained with is_deleted = true (soft delete) rather than dropped.
     columns:
       - name: order_id
         data_tests:
@@ -17,11 +18,19 @@ models:
               to: ref('stg_users')
               field: user_id
       - name: status
-        description: Completed order status only.
+        description: Order lifecycle status.
         data_tests:
           - not_null
           - accepted_values:
-              values: ['PAID', 'CANCELLED']
+              values: ['CREATED', 'PAID', 'CANCELLED']
+      - name: is_deleted
+        description: >
+          True when the most recent event for this order was a Debezium delete
+          (op = 'd'). Soft delete — the row is kept for audit/history.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
       - name: paid_amount
         description: total_amount when PAID, else 0.
         data_tests:
@@ -41,8 +50,7 @@ models:
           - not_null
       - name: order_id
         description: >
-          Parent order. Points to stg_orders (not core_orders) because lines
-          also exist for CREATED orders that core_orders filters out.
+          Parent order in stg_orders.
         data_tests:
           - not_null
           - relationships:

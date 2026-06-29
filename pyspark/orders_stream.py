@@ -3,7 +3,7 @@ import os
 sys.stdout.reconfigure(line_buffering=True)
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col
+from pyspark.sql.functions import from_json, col, coalesce
 from pyspark.sql.types import StructType, StructField, StringType, LongType, DecimalType
 
 MINIO_USER = os.environ.get("MINIO_ROOT_USER", "minioadmin")
@@ -49,6 +49,7 @@ order_schema = StructType([
 
 debezium_order_schema = StructType([
     StructField("payload", StructType([
+        StructField("before", order_schema),
         StructField("after", order_schema),
         StructField("source", source_schema),
         StructField("op", StringType()),
@@ -156,7 +157,32 @@ def make_stream(topic, schema):
         ) \
         .filter(col("op").isin("c", "u", "r"))
 
-orders_df = make_stream("ecom.public.orders", debezium_order_schema)
+# orders icin delete (op='d') olaylarini da yakaliyoruz. Delete event'inde
+# payload.after NULL olur, silinen satirin degerleri payload.before'da gelir.
+# Bu yuzden her alani COALESCE(after, before) ile dolduruyoruz: c/u/r icin
+# after, d icin before kullanilir. op='d' bronze'a yazilir, downstream'de
+# is_deleted'a cevrilir.
+def make_orders_stream(topic, schema):
+    return spark.readStream \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", "kafka:9092") \
+        .option("subscribe", topic) \
+        .option("startingOffsets", "earliest") \
+        .load() \
+        .select(from_json(col("value").cast("string"), schema).alias("data")) \
+        .select(
+            col("data.payload.op").alias("op"),
+            col("data.payload.source.lsn").alias("lsn"),
+            col("data.payload.source.ts_ms").alias("ts_ms"),
+            coalesce(col("data.payload.after.order_id"), col("data.payload.before.order_id")).alias("order_id"),
+            coalesce(col("data.payload.after.user_id"), col("data.payload.before.user_id")).alias("user_id"),
+            coalesce(col("data.payload.after.status"), col("data.payload.before.status")).alias("status"),
+            coalesce(col("data.payload.after.total_amount"), col("data.payload.before.total_amount")).alias("total_amount"),
+            coalesce(col("data.payload.after.created_at"), col("data.payload.before.created_at")).alias("created_at"),
+        ) \
+        .filter(col("op").isin("c", "u", "r", "d"))
+
+orders_df = make_orders_stream("ecom.public.orders", debezium_order_schema)
 users_df = make_stream("ecom.public.users", debezium_user_schema)
 products_df = make_stream("ecom.public.products", debezium_product_schema)
 order_items_df = make_stream("ecom.public.order_items", debezium_order_item_schema)

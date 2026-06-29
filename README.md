@@ -311,6 +311,32 @@ This is the canonical way to order CDC events. It keeps the source schema
 untouched — no need to add an `updated_at` column to the OLTP database, which
 you often cannot modify in production anyway.
 
+### CDC Operation Handling (snapshot, create, update, delete)
+
+Each Debezium event carries an `op` code: `r` (read / initial snapshot of rows
+that already existed when CDC started), `c` (insert), `u` (update), `d`
+(delete). All four are handled deliberately:
+
+- **Snapshot (`op = 'r'`) rows are kept.** When the connector first starts it
+  reads every existing row as `op = 'r'`. These are real records that predate
+  the pipeline — dropping them would silently lose all data that existed before
+  CDC was switched on. They flow through to silver like any create.
+- **`CREATED` orders are kept.** `CREATED` is a valid lifecycle state, not
+  noise — it powers analyses like unpaid-cart / abandoned-order reporting. The
+  core model keeps every status (`CREATED`, `PAID`, `CANCELLED`) rather than
+  filtering to terminal states only.
+- **Deletes are handled as soft deletes (deliberate choice).** When a row is
+  deleted in Postgres, Debezium emits `op = 'd'` with the row's values in
+  `payload.before` (and `payload.after` null). The streaming job reads both
+  `before` and `after` and coalesces them, so the delete is captured with its
+  key intact. Downstream, instead of physically removing the row, the model
+  sets `is_deleted = true` and keeps it. This is intentional: the lakehouse
+  preserves history for audit and analytics even after the source row is gone.
+  Marts then exclude `is_deleted = true` rows from revenue and sales metrics,
+  so deleted orders stay queryable without polluting business numbers.
+  (`tombstones.on.delete` is `false` on the connector, so a delete is a single
+  event with no trailing null tombstone.)
+
 ### Streaming Referential Consistency
 
 `orders` and `order_items` are written to bronze as **independent streams**
