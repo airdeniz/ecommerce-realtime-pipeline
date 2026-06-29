@@ -4,10 +4,11 @@ WITH source AS (
         lsn,
         ts_ms,
         user_id,
-        full_name,
-        city,
-        CAST(created_at AS TIMESTAMP) AS created_at
+        get_json_object(raw_payload, '$.full_name')             AS full_name,
+        get_json_object(raw_payload, '$.city')                  AS city,
+        CAST(get_json_object(raw_payload, '$.created_at') AS TIMESTAMP) AS created_at
     FROM {{ source('bronze', 'users') }}
+    WHERE op IN ('c', 'u', 'r', 'd')
 ),
 
 deduped AS (

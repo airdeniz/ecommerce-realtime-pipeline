@@ -3,7 +3,7 @@ import os
 sys.stdout.reconfigure(line_buffering=True)
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, coalesce
+from pyspark.sql.functions import from_json, col, coalesce, to_json, get_json_object
 from pyspark.sql.types import StructType, StructField, StringType, LongType, DecimalType
 
 MINIO_USER = os.environ.get("MINIO_ROOT_USER", "minioadmin")
@@ -108,59 +108,62 @@ debezium_order_item_schema = StructType([
     ]))
 ])
 
-# Iceberg tablolari olustur (lsn + ts_ms ile -> downstream dedup icin)
-# JDBC catalog'da namespace otomatik olusmadigi icin once acikca yaratiyoruz.
+# Iceberg bronze tablolari: HAM (raw) payload yaklasimi.
+# Her tablo ayni minimal sema:
+#   op, lsn, ts_ms  -> CDC metadata (dedup ve siralama icin)
+#   <pk>            -> dedup partition anahtari (JSON'dan her seferinde cikarmak
+#                      yerine ayri kolon -> performans + temiz PARTITION BY)
+#   raw_payload     -> Debezium payload'inin TAMAMI, JSON string olarak
+#
+# NEDEN: kaynak tabloya yeni bir kolon eklendiginde bronze semasini hic
+# degistirmeden o kolon otomatik yakalanir (raw_payload icinde gelir).
+# Boylece "kullanmasak bile her seyi sakla" prensibi saglanir: ileride bir
+# kolona ihtiyac olursa gecmis veride de mevcuttur. Alanlar staging'de
+# get_json_object / JSON path ile cikarilir. Trade-off: okurken JSON parse
+# maliyeti, ama bronze "yakala-sakla" katmani; anlamlandirma yukari katmanda.
 spark.sql("CREATE NAMESPACE IF NOT EXISTS lakehouse.bronze")
 
 spark.sql("""
     CREATE TABLE IF NOT EXISTS lakehouse.bronze.orders (
         op STRING, lsn BIGINT, ts_ms BIGINT,
-        order_id BIGINT, user_id BIGINT,
-        status STRING, total_amount STRING, created_at STRING
+        order_id BIGINT,
+        raw_payload STRING
     ) USING iceberg
 """)
 
 spark.sql("""
     CREATE TABLE IF NOT EXISTS lakehouse.bronze.users (
         op STRING, lsn BIGINT, ts_ms BIGINT,
-        user_id BIGINT, full_name STRING,
-        city STRING, created_at STRING
+        user_id BIGINT,
+        raw_payload STRING
     ) USING iceberg
 """)
 
 spark.sql("""
     CREATE TABLE IF NOT EXISTS lakehouse.bronze.products (
         op STRING, lsn BIGINT, ts_ms BIGINT,
-        product_id BIGINT, name STRING,
-        category STRING, price STRING
+        product_id BIGINT,
+        raw_payload STRING
     ) USING iceberg
 """)
 
 spark.sql("""
     CREATE TABLE IF NOT EXISTS lakehouse.bronze.order_items (
         op STRING, lsn BIGINT, ts_ms BIGINT,
-        order_item_id BIGINT, order_id BIGINT,
-        product_id BIGINT, quantity BIGINT, unit_price STRING
+        order_item_id BIGINT,
+        raw_payload STRING
     ) USING iceberg
 """)
 
-# Tum tablolar icin tek, delete-aware stream uretici. Her CDC olayinda
-# (c/u/r/d) op, lsn, ts_ms ve veri kolonlarini cikarir. Delete'te (op='d')
-# payload.after NULL olur; o yuzden her veri kolonunu COALESCE(after, before)
-# ile dolduruyoruz. Kolon adlarini sema'dan otomatik okuyoruz, boylece her
-# tablo ayni fonksiyonu kullanir. op bronze'a yazilir, downstream'de
-# is_deleted'a cevrilir (soft delete).
-def make_stream(topic, schema):
-    data_cols = [f.name for f in schema["payload"].dataType["after"].dataType.fields]
-    selects = [
-        col("data.payload.op").alias("op"),
-        col("data.payload.source.lsn").alias("lsn"),
-        col("data.payload.source.ts_ms").alias("ts_ms"),
-    ]
-    for c in data_cols:
-        selects.append(
-            coalesce(col(f"data.payload.after.{c}"), col(f"data.payload.before.{c}")).alias(c)
-        )
+# Tum tablolar icin tek, delete-aware stream uretici.
+# Cikti: op, lsn, ts_ms, <pk>, raw_payload
+#   - op/lsn/ts_ms: CDC metadata (siralama + dedup)
+#   - pk: dedup partition anahtari; delete'te after NULL oldugu icin
+#         COALESCE(after.<pk>, before.<pk>) ile alinir
+#   - raw_payload: payload.after'in TAMAMI JSON string (delete'te after NULL
+#         oldugundan before kullanilir). Tum is kolonlari burada; yeni kolon
+#         eklendiginde otomatik yakalanir.
+def make_stream(topic, schema, pk):
     return spark.readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", "kafka:9092") \
@@ -168,13 +171,19 @@ def make_stream(topic, schema):
         .option("startingOffsets", "earliest") \
         .load() \
         .select(from_json(col("value").cast("string"), schema).alias("data")) \
-        .select(*selects) \
+        .select(
+            col("data.payload.op").alias("op"),
+            col("data.payload.source.lsn").alias("lsn"),
+            col("data.payload.source.ts_ms").alias("ts_ms"),
+            coalesce(col(f"data.payload.after.{pk}"), col(f"data.payload.before.{pk}")).alias(pk),
+            coalesce(to_json(col("data.payload.after")), to_json(col("data.payload.before"))).alias("raw_payload"),
+        ) \
         .filter(col("op").isin("c", "u", "r", "d"))
 
-orders_df = make_stream("ecom.public.orders", debezium_order_schema)
-users_df = make_stream("ecom.public.users", debezium_user_schema)
-products_df = make_stream("ecom.public.products", debezium_product_schema)
-order_items_df = make_stream("ecom.public.order_items", debezium_order_item_schema)
+orders_df = make_stream("ecom.public.orders", debezium_order_schema, "order_id")
+users_df = make_stream("ecom.public.users", debezium_user_schema, "user_id")
+products_df = make_stream("ecom.public.products", debezium_product_schema, "product_id")
+order_items_df = make_stream("ecom.public.order_items", debezium_order_item_schema, "order_item_id")
 
 def write_to_iceberg(table_name):
     def inner(batch_df, batch_id):

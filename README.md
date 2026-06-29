@@ -127,11 +127,11 @@ Web UI for inspecting Kafka topics, messages, and connector status.
 **PySpark 3.5.1 (`pyspark/orders_stream.py`)**
 Structured Streaming job that:
 1. Subscribes to all `ecom.public.*` topics from earliest offset
-2. Parses the Debezium JSON payload
-3. Filters to only `create`, `update`, `read` operations
+2. Captures `op`, `lsn`, `ts_ms`, the dedup key, and the **full Debezium payload as a raw JSON string** (`raw_payload`)
+3. Keeps all CDC operations — `create`, `update`, snapshot (`read`), and `delete` (delete handled as soft delete downstream)
 4. Writes to Iceberg bronze tables in MinIO
 
-*Why:* Kafka events are raw Debezium JSON. We need transformation logic and Iceberg format support — that's what Spark provides. A Kafka Connect S3 sink would only dump raw JSON.
+*Why raw JSON:* Storing the whole payload instead of a fixed column list means a new source column is captured automatically — no bronze schema change, and the history is there when analytics eventually needs it. Fields are extracted from `raw_payload` in staging. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full rationale.
 
 **Stock Monitor (`stock-monitor/stock_monitor.py`)**
 A second, independent Kafka consumer (consumer group `stock-monitor-service`) that subscribes to `ecom.public.inventory` and raises a low-stock alert when a product drops below a threshold. Does not touch the analytics pipeline.

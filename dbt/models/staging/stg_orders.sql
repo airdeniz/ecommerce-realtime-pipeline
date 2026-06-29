@@ -4,20 +4,19 @@ WITH source AS (
         lsn,
         ts_ms,
         order_id,
-        user_id,
-        status,
-        CAST(total_amount AS DECIMAL(12,2)) AS total_amount,
-        CAST(created_at AS TIMESTAMP) AS created_at
+        -- Is kolonlari bronze'da ayri kolon degil; raw_payload JSON'undan
+        -- cikariliyor. Kaynaga yeni kolon eklenirse buraya bir satir eklemek
+        -- yeterli; bronze semasi degismez, gecmis veri raw_payload'da hazir.
+        get_json_object(raw_payload, '$.user_id')      AS user_id,
+        get_json_object(raw_payload, '$.status')       AS status,
+        CAST(get_json_object(raw_payload, '$.total_amount') AS DECIMAL(12,2)) AS total_amount,
+        CAST(get_json_object(raw_payload, '$.created_at') AS TIMESTAMP)       AS created_at
     FROM {{ source('bronze', 'orders') }}
-    -- r = ilk snapshot (mevcut kayitlar), c = create, u = update, d = delete.
-    -- Hepsini aliyoruz: snapshot baslangic verisidir, delete ise asagida
-    -- is_deleted'a cevrilir (hard delete yerine soft delete).
+    -- r = ilk snapshot, c = create, u = update, d = delete. Hepsini aliyoruz;
+    -- delete asagida is_deleted'a cevrilir (soft delete).
     WHERE op IN ('c', 'u', 'r', 'd')
 ),
 
--- Bir order_id icin birden fazla event (CREATED, PAID, hatta DELETE) ayni
--- created_at'e sahip olabildiginden, en guncel versiyonu Debezium WAL LSN'ine
--- gore seciyoruz. Eger en guncel event delete ise o kazanir ve is_deleted=true olur.
 deduped AS (
     SELECT *,
         ROW_NUMBER() OVER (
@@ -29,7 +28,7 @@ deduped AS (
 
 SELECT
     order_id,
-    user_id,
+    CAST(user_id AS BIGINT) AS user_id,
     status,
     total_amount,
     created_at,

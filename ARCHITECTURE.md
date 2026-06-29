@@ -24,7 +24,7 @@ and where it becomes **Parquet** (PySpark/Iceberg). Tracing one value —
 | 5 | Debezium | **JSON envelope** | `{"payload":{"after":{...},"op":"c","source":{"lsn":...}}}` |
 | 6 | Kafka topic | UTF-8 JSON bytes | byte array (Kafka is content-agnostic) |
 | 7 | PySpark | DataFrame | `from_json` + `StructType` → typed columns |
-| 8 | Iceberg bronze | **Parquet** | columnar binary in MinIO + Iceberg metadata |
+| 8 | Iceberg bronze | **Parquet** (raw JSON inside) | metadata + dedup key as columns, full payload as JSON string |
 | 9 | dbt silver/gold | Parquet (transformed) | cleaned, joined, aggregated |
 | 10 | Superset | SQL result set | rows fetched via Thrift → rendered as charts |
 
@@ -51,12 +51,28 @@ aggregates go to gold. Each layer serves a different audience and a different
 purpose.
 
 **Bronze — raw, append-only, complete history.** Every CDC event lands here
-exactly as Debezium emitted it: `op`, `lsn`, `ts_ms`, and the full
-`payload.after`. The same `order_id` appears multiple times — once for
-CREATED, once for PAID, maybe once for CANCELLED. Nothing is updated, nothing
-is deleted. This is the source of truth for the entire pipeline; every
-downstream layer can be rebuilt from bronze. It exists because the mutable
-source database does not preserve history — bronze does.
+as CDC metadata (`op`, `lsn`, `ts_ms`) + the dedup key (e.g. `order_id`) as
+typed columns, plus the **entire Debezium payload as a raw JSON string**
+(`raw_payload`). The same `order_id` appears multiple times — once for CREATED,
+once for PAID, maybe once for CANCELLED. Nothing is updated, nothing is
+deleted. This is the source of truth for the entire pipeline; every downstream
+layer can be rebuilt from bronze. It exists because the mutable source database
+does not preserve history — bronze does.
+
+**Why store the raw payload instead of parsed columns?** If bronze pinned a
+fixed column list, a new source column (say `discount_amount` added to `orders`)
+would silently be dropped at ingest — it arrives in Kafka but the parser ignores
+it. Six months later, when analytics finally needs that column, the historical
+values are gone: Kafka's retention window has expired and the OLTP source only
+keeps the *current* value, not the history. Storing the full payload as JSON
+avoids this entirely. Whatever Debezium emits is captured verbatim, so any
+column — present or future — is already in bronze. To start using a new column
+you just add one `get_json_object(raw_payload, '$.new_col')` line in staging;
+bronze never changes and the history is already there. The trade-off is a JSON
+parse cost on read, which is acceptable because bronze is the *capture-and-store*
+layer — interpretation belongs upstream in staging/silver. The dedup key is
+kept as a separate typed column (not parsed from JSON each time) so
+`PARTITION BY` stays clean and fast.
 
 *Without bronze, today nothing breaks* — silver and gold tables live in their
 own Parquet files, reports keep working. But tomorrow the damage starts:

@@ -4,10 +4,10 @@ WITH source AS (
         lsn,
         ts_ms,
         order_item_id,
-        order_id,
-        product_id,
-        quantity,
-        CAST(unit_price AS DECIMAL(10,2)) AS unit_price
+        CAST(get_json_object(raw_payload, '$.order_id') AS BIGINT)    AS order_id,
+        CAST(get_json_object(raw_payload, '$.product_id') AS BIGINT)  AS product_id,
+        CAST(get_json_object(raw_payload, '$.quantity') AS BIGINT)    AS quantity,
+        CAST(get_json_object(raw_payload, '$.unit_price') AS DECIMAL(10,2)) AS unit_price
     FROM {{ source('bronze', 'order_items') }}
     WHERE op IN ('c', 'u', 'r', 'd')
 ),

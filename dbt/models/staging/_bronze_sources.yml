@@ -6,8 +6,12 @@ sources:
       Append-only CDC landing zone written by the PySpark streaming job.
       Holds every version of each row (one per Debezium event), so keys are
       NOT unique here — deduplication happens in the staging layer using the
-      WAL LSN. The catalog is embedded in `schema` because dbt-spark does not
-      allow a separate `database`/catalog field.
+      WAL LSN. Each table stores CDC metadata (op, lsn, ts_ms) and the dedup
+      key as typed columns, plus the full Debezium payload as a raw JSON string
+      in `raw_payload`. Business fields are extracted from `raw_payload` in
+      staging — so a new source column is captured automatically without any
+      bronze schema change. The catalog is embedded in `schema` because
+      dbt-spark does not allow a separate `database`/catalog field.
     schema: lakehouse.bronze
     tables:
       - name: orders

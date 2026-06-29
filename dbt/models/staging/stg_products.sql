@@ -4,10 +4,11 @@ WITH source AS (
         lsn,
         ts_ms,
         product_id,
-        name,
-        category,
-        CAST(price AS DECIMAL(10,2)) AS price
+        get_json_object(raw_payload, '$.name')          AS name,
+        get_json_object(raw_payload, '$.category')      AS category,
+        CAST(get_json_object(raw_payload, '$.price') AS DECIMAL(10,2)) AS price
     FROM {{ source('bronze', 'products') }}
+    WHERE op IN ('c', 'u', 'r', 'd')
 ),
 
 deduped AS (
