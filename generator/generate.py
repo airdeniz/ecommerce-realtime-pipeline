@@ -52,7 +52,7 @@ def main():
             cur.execute("UPDATE orders SET status = 'CANCELLED' WHERE order_id = %s", (order_id,))
 
         print(f"Siparis {order_id} | kullanici {user_id} | tutar {round(total,2)} | {len(items)} kalem")
-        time.sleep(6.0)
+        time.sleep(random.uniform(5.0, 7.0))
 
 if __name__ == "__main__":
     try:
