@@ -89,6 +89,19 @@ services:
     environment:
       PG_DSN: ${PG_DSN}
 
+  stock-monitor:
+    build: ./stock-monitor
+    container_name: ecom-stock-monitor
+    depends_on:
+      kafka:
+        condition: service_healthy
+      connector-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      INVENTORY_TOPIC: ecom.public.inventory
+      LOW_STOCK_THRESHOLD: ${LOW_STOCK_THRESHOLD:-10}
+
   connector-init:
     image: curlimages/curl:8.6.0
     container_name: ecom-connector-init

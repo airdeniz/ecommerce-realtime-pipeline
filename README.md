@@ -107,7 +107,7 @@ Kafka Connect plugin that reads Postgres WAL via the `pgoutput` plugin and publi
 *Why:* CDC enables capturing changes without polling tables. Zero load on the source database.
 
 **Kafka (KRaft mode)**
-Message broker that decouples the producer (Debezium) from consumers (PySpark). Topics: `ecom.public.orders`, `ecom.public.users`, `ecom.public.products`, `ecom.public.order_items`.
+Message broker that decouples the producer (Debezium) from consumers (PySpark, stock monitor). Topics: `ecom.public.orders`, `ecom.public.users`, `ecom.public.products`, `ecom.public.order_items`, `ecom.public.inventory`.
 *Why:* Without Kafka, every downstream consumer would have to connect directly to Postgres. Kafka acts as a durable buffer with multiple consumer support.
 
 **Redpanda Console**
@@ -124,6 +124,10 @@ Structured Streaming job that:
 4. Writes to Iceberg bronze tables in MinIO
 
 *Why:* Kafka events are raw Debezium JSON. We need transformation logic and Iceberg format support — that's what Spark provides. A Kafka Connect S3 sink would only dump raw JSON.
+
+**Stock Monitor (`stock-monitor/stock_monitor.py`)**
+A second, independent Kafka consumer (consumer group `stock-monitor-service`) that subscribes to `ecom.public.inventory` and raises a low-stock alert when a product drops below a threshold. Does not touch the analytics pipeline.
+*Why:* Demonstrates Kafka fan-out — the same CDC stream feeding multiple independent consumers. Adding it required no changes to Postgres, Debezium, Kafka, or PySpark. See "Multiple Consumers" below.
 
 ### Lakehouse
 
@@ -285,6 +289,50 @@ expected tail lag (`warn_if: ">0"`) and only **fail** on structural breakage
 (`error_if: ">500"`), instead of demanding perfect consistency on a moving
 target.
 
+## Multiple Consumers: The Stock Monitoring Service
+
+The same CDC stream can feed more than one consumer. The analytics pipeline
+(PySpark → bronze → dbt) is one consumer; the **stock monitoring service** is a
+second, completely independent one. It reads the `ecom.public.inventory` topic —
+which Debezium already produces — and raises a low-stock alert when a product
+drops below a threshold.
+
+**Stock control is the application's job, not CDC's.** When a customer places an
+order, the backend (OLTP) checks stock, decrements it, and rejects the order if
+inventory is insufficient — all inside a single transaction, in milliseconds.
+By the time Debezium sees the `stock_qty: 50 → 47` change in the WAL, the
+decision is already made and the stock is already reduced. CDC **observes the
+result**; it does not make the decision.
+
+So what is inventory data good for on the CDC side?
+
+- **Alerting / monitoring** — not stock *management*, stock *observation*. Notify
+  the purchasing team when a product is running low so they can reorder from the
+  supplier. The application won't do this — its job is taking orders, not supply
+  planning.
+- **Analytics** — burn-rate analysis: how fast does a product sell, at what
+  hours does it accelerate, when will it run out? This history does not exist in
+  OLTP (which only holds the *current* stock); it exists in the bronze event
+  stream.
+- **Synchronization** — push inventory changes to other systems: marketplace
+  integrations (selling on one platform should update stock on another),
+  warehouse management, supplier portals. Rather than each system connecting to
+  the OLTP database separately, they all read from the Kafka topic.
+
+**What it demonstrates architecturally.** Adding this service required **zero
+changes** to Postgres, Debezium, Kafka, or PySpark. The `inventory` table was
+already in Debezium's `table.include.list` with `REPLICA IDENTITY FULL`, so the
+topic was already flowing — just unconsumed. The new service simply attaches a
+**new consumer group** (`stock-monitor-service`) to that topic. Kafka gives each
+consumer group an independent copy of the stream with its own offsets, so the
+stock monitor reads at its own pace without affecting the analytics pipeline.
+This is Kafka's fan-out capability in action — the concrete payoff of putting a
+log between the source and its consumers.
+
+The example implementation (`stock-monitor/stock_monitor.py`) logs alerts to
+stdout; in production the alert path would call a Slack webhook, email, or
+PagerDuty.
+
 ## Project Phases
 
 - [x] Phase 1 — CDC Pipeline: Postgres + Debezium + Kafka + Order Generator
@@ -293,6 +341,7 @@ target.
 - [x] Phase 4 — Orchestration: Airflow DAG (nightly dbt run)
 - [x] Phase 5 — Dashboard: Superset
 - [x] Phase 6 — Persistence: Kafka + Superset Postgres metadata
+- [x] Phase 7 — Multiple Consumers: stock monitoring service (Kafka fan-out)
 
 ## Known Limitations & Production Roadmap
 
