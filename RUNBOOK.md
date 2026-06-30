@@ -1,5 +1,31 @@
 # Runbook
 
+## Quick Commands (cheat sheet)
+
+```bash
+# Start everything from scratch (build images first)
+docker compose up -d --build
+
+# Resume after a stop (continue with existing data, fast — no rebuild)
+docker compose start
+
+# Pause everything, keep all data (resume later with `start`)
+docker compose stop
+
+# FREEZE data generation only — keep query/dashboard/AI layer running.
+# Use this to query, build Superset dashboards, and ask the AI agent
+# against a fixed dataset that no longer grows.
+docker compose stop generator pyspark stock-monitor connect
+#   ...resume data flow later with:
+docker compose start generator pyspark stock-monitor connect
+
+# FULL RESET — delete containers AND volumes (wipes all data, fresh schema)
+docker compose down -v
+docker compose up -d --build
+```
+
+---
+
 Common operational commands for running, resetting, querying, and debugging the
 pipeline. For first-time setup see the [README](README.md); for problems and
 their fixes see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
