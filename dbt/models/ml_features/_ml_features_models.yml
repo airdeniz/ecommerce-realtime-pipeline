@@ -1,0 +1,51 @@
+version: 2
+
+models:
+  - name: feat_order_features
+    description: >
+      Order-level features for the unsupervised anomaly model. One row per
+      non-deleted order: amount, basket shape, per-item prices and hour of day.
+    columns:
+      - name: order_id
+        description: Order identifier (one row per order).
+        data_tests:
+          - unique
+          - not_null
+      - name: user_id
+        data_tests:
+          - not_null
+      - name: total_amount
+        data_tests:
+          - not_null
+
+  - name: feat_customer_rfm
+    description: >
+      Customer-level RFM + behavioural features (one row per user). Recency is in
+      fractional days relative to the dataset's latest order. Feeds segmentation
+      and churn. NOTE: the churn model deliberately drops recency from its inputs
+      because the churn proxy label is derived from recency (leakage avoidance).
+    columns:
+      - name: user_id
+        description: Customer identifier (one row per user).
+        data_tests:
+          - unique
+          - not_null
+      - name: frequency
+        data_tests:
+          - not_null
+      - name: monetary
+        data_tests:
+          - not_null
+
+  - name: feat_revenue_hourly
+    description: >
+      Hourly revenue/order time series for the demand-forecast model.
+    columns:
+      - name: revenue_hour
+        description: Hour bucket (one row per hour).
+        data_tests:
+          - unique
+          - not_null
+      - name: total_revenue
+        data_tests:
+          - not_null

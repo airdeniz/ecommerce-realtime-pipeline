@@ -30,7 +30,10 @@ models:
         data_tests:
           - not_null
           - accepted_values:
+              # quote:false so the test renders `in (true, false)` not `in
+              # ('True','False')` — Spark can't compare a boolean column to strings.
               values: [true, false]
+              quote: false
       - name: paid_amount
         description: total_amount when PAID, else 0.
         data_tests:
@@ -78,4 +81,7 @@ models:
         data_tests:
           - not_null
           - accepted_values:
+              # quote:false so the test renders `in (true, false)` not `in
+              # ('True','False')` — Spark can't compare a boolean column to strings.
               values: [true, false]
+              quote: false

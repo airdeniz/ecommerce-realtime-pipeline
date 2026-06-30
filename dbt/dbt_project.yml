@@ -12,6 +12,11 @@ test-paths: ["tests"]
 on-run-start:
   - "CREATE NAMESPACE IF NOT EXISTS lakehouse.silver"
   - "CREATE NAMESPACE IF NOT EXISTS lakehouse.gold"
+  # ML feature tables (built by dbt) and ML model outputs (written by the
+  # spark-submit ML jobs) live in their own namespaces; the JDBC catalog won't
+  # auto-create them.
+  - "CREATE NAMESPACE IF NOT EXISTS lakehouse.ml_features"
+  - "CREATE NAMESPACE IF NOT EXISTS lakehouse.ml"
 
 models:
   ecommerce:
@@ -31,3 +36,10 @@ models:
       +materialized: table
       +file_format: iceberg
       +schema: lakehouse.gold
+    ml_features:
+      # ML feature store: silver-derived feature tables consumed by the
+      # spark-submit ML jobs. Materialized as Iceberg tables in their own
+      # namespace so they are versioned, testable and rebuildable like the marts.
+      +materialized: table
+      +file_format: iceberg
+      +schema: lakehouse.ml_features

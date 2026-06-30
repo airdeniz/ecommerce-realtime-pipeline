@@ -121,6 +121,56 @@ tolerate normal lag, fail only on structural breakage.
 
 ---
 
+## Machine Learning layer
+
+### `spark-submit: command not found` / `JAVA_HOME is not set`
+**Symptom:** An `ml_pipeline` task fails immediately with `spark-submit: not
+found` or a Java error.
+**Cause:** The Airflow image needs a JVM and PySpark to run the ML jobs in local
+mode; the base `apache/airflow` image ships neither.
+**Fix:** The `airflow/Dockerfile` installs `openjdk-17-jre-headless` and
+`pip install pyspark==3.5.1`. After editing it, rebuild:
+`docker compose build --no-cache airflow-scheduler airflow-webserver airflow-init`.
+
+### Prophet install / cmdstan compilation
+**Symptom:** Long or failing image build while installing Prophet (Stan/cmdstan
+compilation).
+**Cause:** The old `fbprophet` (and `prophet<1.1`) compiled Stan at install time,
+which is slow and fragile in containers.
+**Fix:** Pin `prophet>=1.1.5` — it ships a **precompiled** Stan model and does not
+compile cmdstan at pip-install. If the wheel still misbehaves in this
+environment, fall back to a lighter forecaster: swap `demand_forecast.py` to
+`statsmodels` (Holt-Winters / SARIMA) or an sklearn linear model with lag
+features — the rest of the ML layer is unaffected.
+
+### PySpark vs the image's Python version
+**Symptom:** ML jobs crash on import with a PySpark/py4j error after the image
+builds fine.
+**Cause:** `pyspark==3.5.1` must match the baked Spark JARs (3.5.1), and must run
+on a supported Python. The `apache/airflow:2.9.1` image is Python 3.12.
+**Fix:** If 3.12 causes issues, pin the base image to
+`apache/airflow:2.9.1-python3.11` and rebuild. (Verified as a build-time
+checkpoint.)
+
+### `Table or namespace lakehouse.ml_features not found`
+**Symptom:** An ML job fails reading its feature table.
+**Cause:** The feature tables are dbt models — they don't exist until `dbt run`
+has built them, and the `lakehouse.ml_features` / `lakehouse.ml` namespaces are
+created by dbt's `on-run-start`.
+**Fix:** Run `dbt run` before `ml_pipeline` (the nightly DAGs are ordered 02:00
+dbt → 03:00 ML). `common.py` also `CREATE NAMESPACE IF NOT EXISTS lakehouse.ml`
+so the write side is self-healing.
+
+### pip dependency conflicts (dbt + pyspark + prophet)
+**Symptom:** `pip install` in the Airflow image warns about incompatible pins
+(pandas/numpy/protobuf) shared by dbt-core, pyspark and prophet.
+**Cause:** These libraries are installed unconstrained into one image.
+**Fix:** The current pins resolve in practice; if a future bump breaks, isolate
+the ML stack into a dedicated image extending `./pyspark` and trigger it from a
+separate runner instead of in-scheduler (the alternative considered in the plan).
+
+---
+
 ## Stock Monitor (Kafka consumer)
 
 ### No alerts despite low stock

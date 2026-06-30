@@ -70,6 +70,20 @@ bronze → dbt (staging views → silver → gold) → Spark Thrift → Superset
 - dbt connects over Thrift (`profiles.yml`, `host: spark-thrift`), so it only works
   from inside a container on the compose network (e.g. `ecom-airflow-scheduler`).
 
+## ML layer (additive)
+
+- **Two new namespaces, both Iceberg in the same JDBC catalog:** `lakehouse.ml_features`
+  (feature tables, built by dbt models in `dbt/models/ml_features/`) and `lakehouse.ml`
+  (model outputs, written by the ML jobs). Both are added to `on-run-start`. The layer
+  reads silver/gold only — it never touches bronze/silver/gold definitions.
+- **ML jobs run as local `spark-submit` inside `ecom-airflow-scheduler`**, not a separate
+  service. Scripts live in `ml/` (mounted at `/opt/airflow/ml`); the Iceberg/S3/JDBC JARs
+  are baked into the Airflow image at `/opt/ml-jars`; `ml/common.py` holds the shared
+  SparkSession + read/write helpers. A second DAG `ml_pipeline` (03:00, after dbt's 02:00)
+  orchestrates the four jobs.
+- **Churn uses a documented proxy label** (recency-based); `recency_days` is excluded from
+  the churn model's features to avoid leakage. See ARCHITECTURE.md "Machine Learning Layer".
+
 ## Common commands
 
 All run against containers (`ecom-*`). On Windows PowerShell use `curl.exe`, not `curl`.
@@ -88,7 +102,10 @@ docker compose stop generator pyspark stock-monitor connect
 docker exec ecom-airflow-scheduler dbt run  --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
 docker exec ecom-airflow-scheduler dbt test --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
 docker exec ecom-airflow-scheduler dbt run --select stg_orders --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
-# healthy dbt run/test ends with: PASS=8 WARN=0 ERROR=0 SKIP=0 TOTAL=8
+# healthy dbt run builds 11 models (8 core + 3 ml_features): PASS=11 WARN=0 ERROR=0
+
+# ML jobs (after dbt has built lakehouse.ml_features); writes to lakehouse.ml.*
+docker exec ecom-airflow-scheduler airflow dags trigger ml_pipeline
 
 # Query the lakehouse
 docker exec -it ecom-spark-thrift /opt/spark/bin/beeline -u "jdbc:hive2://localhost:10000"

@@ -23,8 +23,8 @@ docker compose start generator pyspark stock-monitor connect
 docker compose down -v
 docker compose up -d --build
 
-# Run dbt to (re)build staging -> silver -> gold (after data flows / a reset).
-# Healthy run ends with: PASS=8 WARN=0 ERROR=0 SKIP=0 TOTAL=8
+# Run dbt to (re)build staging -> silver -> gold -> ml_features (after data
+# flows / a reset). Healthy run builds 11 models: PASS=11 WARN=0 ERROR=0.
 docker exec ecom-airflow-scheduler dbt run \
   --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
 ```
@@ -84,7 +84,59 @@ docker exec ecom-airflow-scheduler dbt run --select stg_orders \
   --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
 ```
 
-A healthy run ends with `PASS=8 WARN=0 ERROR=0 SKIP=0 TOTAL=8`.
+A healthy run builds 11 models (8 staging/silver/gold + 3 `ml_features`) and
+ends with `PASS=11 WARN=0 ERROR=0`.
+
+## Machine Learning layer
+
+The ML jobs read `lakehouse.ml_features.*` (built by dbt above) and write model
+outputs to `lakehouse.ml.*`. Each job runs a local Spark engine inside the
+scheduler (no separate Spark cluster). Run the whole pipeline via Airflow:
+
+```bash
+docker exec ecom-airflow-scheduler airflow dags trigger ml_pipeline
+```
+
+Or run a single job by hand (the helper builds the baked --jars list):
+
+```bash
+docker exec ecom-airflow-scheduler bash -c \
+  'JARS=$(ls /opt/ml-jars/*.jar | tr "\n" "," | sed "s/,$//"); \
+   spark-submit --master "local[*]" --driver-memory 2g --jars "$JARS" \
+   --py-files /opt/airflow/ml/common.py /opt/airflow/ml/fraud_isolation_forest.py'
+#   ...swap in demand_forecast.py / customer_segmentation.py / churn_prediction.py
+```
+
+Inspect the results:
+
+```bash
+docker exec -it ecom-mcp-server python -c \
+  "import server; print(server.run_query('SELECT * FROM lakehouse.ml.fraud_scores ORDER BY anomaly_score DESC LIMIT 10'))"
+docker exec -it ecom-mcp-server python -c \
+  "import server; print(server.run_query('SELECT segment_label, COUNT(*) FROM lakehouse.ml.customer_segments GROUP BY segment_label'))"
+```
+
+> The ML jobs depend on `lakehouse.ml_features` existing — run `dbt run` first
+> (the nightly `dbt_pipeline` DAG builds it at 02:00; `ml_pipeline` runs at 03:00).
+
+### Superset — "ML Insights" dashboard
+
+The ML tables are queryable over the **same** Spark Thrift connection Superset
+already uses — no new database connection. To build the dashboard:
+
+1. **Data → Datasets → + Dataset**, pick the existing Spark Thrift database,
+   schema `lakehouse.ml`, and add each table:
+   `fraud_scores`, `demand_forecast`, `customer_segments`, `churn_predictions`.
+2. Suggested charts:
+   - *Flagged orders* — table/bar on `fraud_scores` filtered `is_anomaly = true`,
+     sorted by `anomaly_score` desc.
+   - *Revenue forecast* — time-series line on `demand_forecast` (`ds` vs `yhat`,
+     band `yhat_lower`/`yhat_upper`), filtered by `grain = 'daily'` or `'hourly'`.
+   - *Segments* — pie/bar of customer counts by `segment_label`; scatter of
+     `frequency` vs `monetary` coloured by segment.
+   - *Churn risk* — table of top users by `churn_probability`.
+3. Add the charts to a new **"ML Insights"** dashboard. Superset metadata persists
+   in `superset_db_data`, so it survives restarts (but not `down -v`).
 
 ## Querying the lakehouse
 

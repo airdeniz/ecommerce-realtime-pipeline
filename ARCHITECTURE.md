@@ -41,6 +41,8 @@ string in the JSON to avoid floating-point precision loss in transit.)
 | Staging | `staging` | Spark views (in-memory) | dbt (nightly) |
 | Silver | `lakehouse.silver` | Iceberg (MinIO, JDBC catalog) | dbt (nightly) |
 | Gold | `lakehouse.gold` | Iceberg (MinIO, JDBC catalog) | dbt (nightly) |
+| ML features | `lakehouse.ml_features` | Iceberg (MinIO, JDBC catalog) | dbt (nightly) |
+| ML outputs | `lakehouse.ml` | Iceberg (MinIO, JDBC catalog) | ML jobs (nightly, after dbt) |
 
 **Why layers at all?** Most source systems are **mutable** — an OLTP database
 overwrites old values on every UPDATE. When an order moves from CREATED to
@@ -276,6 +278,92 @@ log between the source and its consumers.
 The example implementation (`stock-monitor/stock_monitor.py`) logs alerts to
 stdout; in production the alert path would call a Slack webhook, email, or
 PagerDuty.
+
+## Machine Learning Layer
+
+The ML layer is a **fourth analytical capability** bolted on top of the medallion
+stack. It is strictly **additive**: it reads the curated silver/gold tables, adds
+two new Iceberg namespaces, and adds a second Airflow DAG. The bronze → silver →
+gold → dbt flow is untouched, and nothing in the streaming/dedup design changes.
+
+```
+silver (core_*) ─► dbt ml_features (lakehouse.ml_features) ─► ML jobs ─► lakehouse.ml ─► Superset / MCP
+```
+
+### Four scenarios
+
+| # | Scenario | Model | Feature source | Output table |
+|---|----------|-------|----------------|--------------|
+| 1 | Fraud / anomaly | IsolationForest (unsupervised) | `feat_order_features` | `lakehouse.ml.fraud_scores` |
+| 2 | Demand forecast | Prophet (hourly + daily) | `feat_revenue_hourly`, `mart_daily_revenue` | `lakehouse.ml.demand_forecast` |
+| 3 | Customer segmentation | KMeans | `feat_customer_rfm` | `lakehouse.ml.customer_segments` |
+| 4 | Churn prediction | LogisticRegression (+ proxy label) | `feat_customer_rfm` | `lakehouse.ml.churn_predictions` |
+
+### Features live in dbt, not in the ML scripts
+
+Feature engineering is done as **dbt models** (`dbt/models/ml_features/`) that
+materialize Iceberg tables in `lakehouse.ml_features`, rather than computed
+ad-hoc inside each Python job. This makes the feature set a **versioned,
+testable, lineage-tracked feature store**: it is built by the *existing* nightly
+dbt run (no separate feature pipeline), the same dedup/soft-delete rules from
+silver apply automatically (the models read `core_*` with `is_deleted = false`),
+and several models can share one feature table (segmentation and churn both read
+`feat_customer_rfm`). A new feature is one SQL column, not a code change in four
+scripts.
+
+### Why ML runs as local `spark-submit` inside the scheduler
+
+The jobs do not get their own service or a Spark cluster. Each runs as
+`spark-submit --master local[*]` **inside the Airflow scheduler**, building a
+SparkSession pointed at the **same Iceberg JDBC catalog** the streaming job uses
+(`pyspark/orders_stream.py`). Two consequences matter:
+
+- **Concurrent-writer safety is free.** The JDBC-over-Postgres catalog already
+  exists precisely so multiple writers can commit atomically (streaming writes
+  bronze while dbt writes silver/gold). The ML jobs become a third writer, into
+  their own `lakehouse.ml` namespace, with the same atomic-commit guarantee — no
+  new coordination machinery.
+- **Train on the driver, write through Spark.** Data is small at this scale, so
+  each job pulls its feature table into pandas (`.toPandas()`), trains a
+  scikit-learn / Prophet model on the driver, then writes the result back as a
+  Spark DataFrame via `writeTo(...).createOrReplace()`. The Iceberg/S3/JDBC JARs
+  are baked into the Airflow image (`/opt/ml-jars`), mirroring the `pyspark`
+  image (minus the Kafka jars — ML reads Iceberg, not Kafka).
+
+The trade-off is a heavier Airflow image and the scheduler doing the compute; the
+isolated alternative (a dedicated ML image extending `./pyspark`, triggered over
+the docker socket) was considered and rejected for this single-machine portfolio
+build because the local-submit path adds **no new service and no new privilege**.
+
+### The churn proxy (a documented synthetic assumption)
+
+Synthetic data has **no ground-truth churn label**, so one is fabricated: a
+customer is labelled churned when their **recency** (days since last order,
+relative to the dataset's latest order — not wall-clock `now()`, which would be
+meaningless on a fresh stack) falls in the worst tercile. A LogisticRegression
+then predicts churn probability from the *other* RFM features.
+
+The critical detail is **leakage avoidance**: because the label is derived from
+recency, `recency_days` is **deliberately excluded** from the model inputs. The
+model learns from frequency / monetary / basket / tenure / category-breadth /
+cancel-rate. This is a demonstration of the modelling mechanics, **not** a
+production churn model — stated plainly so the assumption is never mistaken for a
+real target. The generator cooperates by making ~25% of customers go "quiet"
+after an initial active window, which is what gives recency (and therefore the
+proxy label) a real distribution to separate.
+
+### Synthetic-data caveats
+
+The seed and generator were enriched (≈300 customers, ≈50 products, skewed
+purchase frequency, quiet/churning users, ~2% deliberately anomalous orders) so
+that segmentation and churn have enough rows and behavioural variance to be
+meaningful — KMeans/churn on the original 5 users would have been degenerate.
+The anomaly model keys off the injected outlier orders; the forecast uses an
+**hourly** grain so it produces a usable result within a single day of runtime
+(the daily grain reuses `mart_daily_revenue` and sharpens as history accumulates).
+These are demonstration models on simulated data; the value shown is the
+**end-to-end ML integration pattern**, not the statistical accuracy of any one
+model.
 
 ## Data Retention & Storage Management
 

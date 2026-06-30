@@ -270,6 +270,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./dbt:/opt/airflow/dbt
+      - ./ml:/opt/airflow/ml
     command: airflow webserver
 
   airflow-scheduler:
@@ -284,9 +285,17 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # Passed through to the ML jobs' local SparkSession (Iceberg JDBC catalog +
+      # MinIO/S3a), matching what the pyspark service uses.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ICEBERG_DB_USER: ${ICEBERG_DB_USER}
+      ICEBERG_DB_PASSWORD: ${ICEBERG_DB_PASSWORD}
+      ICEBERG_DB_NAME: ${ICEBERG_DB_NAME}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./dbt:/opt/airflow/dbt
+      - ./ml:/opt/airflow/ml
     command: airflow scheduler
 
   superset-db:
