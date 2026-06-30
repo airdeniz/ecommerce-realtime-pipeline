@@ -33,6 +33,29 @@ sed -i '' 's/\r$//' debezium/register-connector.sh
 (Get-Content file.sh -Raw) -replace "`r`n","`n" | Set-Content file.sh -NoNewline
 ```
 
+### `connector-init` reports success but no connector is registered
+**Symptom:** `connector-init` logs `#!/bin/bash: not found` near the top, then
+prints `Connector kaydedildi` ("connector registered") and exits 0 — but
+`curl http://localhost:8083/connectors` returns `[]`, the `ecom.public.*` topics
+never appear (except `inventory`), and PySpark crashes with
+`UnknownTopicOrPartitionException: This server does not host this topic-partition`.
+**Cause:** Two compounding bugs. (1) The script was saved with a UTF-8 **BOM**,
+so the first line became `<BOM>#!/bin/bash` and the kernel could not read the
+shebang. (2) The readiness loop only waited for the Connect REST port to
+*accept a connection*, not to be *ready* — on a slow host (e.g. Apple Silicon)
+Connect answers `404` while still starting, the loop exits, the POST hits that
+`404`, and the script printed "registered" regardless because it never checked
+the HTTP status. Registration silently failed.
+**Fix:** Strip the BOM, and make the script wait for HTTP `200` from
+`/connectors` before POSTing, then verify the POST returned `201`/`200`/`409`
+(and `exit 1` otherwise) so a failure is loud, not silent. To recover a running
+stack without a full reset, re-run the init container once Connect is up:
+```bash
+docker compose up -d connector-init
+curl http://localhost:8083/connectors      # should now show ["ecommerce-connector"]
+docker compose restart pyspark             # restart so it picks up the new topics
+```
+
 ### `connector-init` returns 409 on restart
 **Symptom:** `{"error_code":409,"message":"Connector ecommerce-connector already exists"}`.
 **Cause:** The connector was already registered in a previous run (config
