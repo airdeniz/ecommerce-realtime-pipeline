@@ -76,19 +76,27 @@ flowchart TB
         ST[("Staging - views<br/>staging.*")]
         SL[("Silver - tables<br/>lakehouse.silver<br/>core_orders, core_order_items")]
         GD[("Gold - tables<br/>lakehouse.gold<br/>mart_daily_revenue<br/>mart_sales_by_category")]
+        MLF[("ML Features<br/>lakehouse.ml_features<br/>order feats, customer RFM,<br/>hourly revenue")]
+        MLO[("ML Outputs<br/>lakehouse.ml<br/>fraud_scores, demand_forecast,<br/>customer_segments, churn_predictions")]
         S -->|writeStream foreachBatch| B
         B --> ST
         ST --> SL
         SL --> GD
+        SL --> MLF
+        MLF --> MLO
     end
 
     subgraph ORCH["Orchestration"]
-        A[Airflow DAG<br/>cron: 0 2 * * *]
+        A[Airflow DAG<br/>dbt_pipeline<br/>cron: 0 2 * * *]
+        MLA[Airflow DAG<br/>ml_pipeline<br/>cron: 0 3 * * *]
         TH[Spark Thrift Server<br/>port 10000]
         DB[dbt Core 1.8]
+        MLJ[ML Jobs<br/>spark-submit local<br/>sklearn / Prophet]
         A -->|trigger| DB
         DB -->|HiveServer2 protocol| TH
         TH -->|Iceberg SQL| LAKEHOUSE
+        MLA -->|trigger| MLJ
+        MLJ -->|read ml_features / write ml| LAKEHOUSE
     end
 
     subgraph VIZ["Visualization"]
