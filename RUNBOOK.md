@@ -38,6 +38,11 @@ their fixes see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 > Paths use the container names (`ecom-*`). On Windows PowerShell use `curl.exe`
 > (not `curl`) and full download paths (e.g. `C:\Users\deniz\Downloads\x.patch`),
 > since `~` does not expand.
+>
+> **Note (Windows PowerShell 5.1):** the `&&` chaining used in some commands below
+> (e.g. `docker compose down -v && docker compose up -d --build`) is not supported —
+> run the two commands separately, or use `;` if you don't care whether the first
+> one succeeds.
 
 ## Lifecycle
 
