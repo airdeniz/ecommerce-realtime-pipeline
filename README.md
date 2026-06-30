@@ -240,6 +240,9 @@ cp .env.example .env
 docker compose up -d
 ```
 
+For day-to-day commands — resetting, running dbt, querying the lakehouse,
+health checks, and demoing features — see the **[Runbook](RUNBOOK.md)**.
+
 ### Initialize Superset (first run only)
 
 ```bash
