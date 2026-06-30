@@ -22,6 +22,11 @@ docker compose start generator pyspark stock-monitor connect
 # FULL RESET — delete containers AND volumes (wipes all data, fresh schema)
 docker compose down -v
 docker compose up -d --build
+
+# Run dbt to (re)build staging -> silver -> gold (after data flows / a reset).
+# Healthy run ends with: PASS=8 WARN=0 ERROR=0 SKIP=0 TOTAL=8
+docker exec ecom-airflow-scheduler dbt run \
+  --project-dir /opt/airflow/dbt --profiles-dir /opt/airflow/dbt
 ```
 
 ---
