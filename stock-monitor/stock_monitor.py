@@ -102,6 +102,7 @@ def build_spark():
         .config("spark.sql.catalog.lakehouse.uri", f"jdbc:postgresql://iceberg-db:5432/{ICE_DB}")
         .config("spark.sql.catalog.lakehouse.jdbc.user", ICE_USER)
         .config("spark.sql.catalog.lakehouse.jdbc.password", ICE_PASS)
+        .config("spark.sql.catalog.lakehouse.jdbc.schema-version", "V1")
         .config("spark.sql.catalog.lakehouse.warehouse", "s3a://lakehouse/")
         .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000")
         .config("spark.hadoop.fs.s3a.access.key", MINIO_USER)

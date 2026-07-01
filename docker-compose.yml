@@ -198,6 +198,7 @@ services:
       --conf spark.sql.catalog.lakehouse.uri=jdbc:postgresql://iceberg-db:5432/$${ICEBERG_DB_NAME}
       --conf spark.sql.catalog.lakehouse.jdbc.user=$${ICEBERG_DB_USER}
       --conf spark.sql.catalog.lakehouse.jdbc.password=$${ICEBERG_DB_PASSWORD}
+      --conf spark.sql.catalog.lakehouse.jdbc.schema-version=V1
       --conf spark.sql.catalog.lakehouse.warehouse=s3a://lakehouse/
       --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000
       --conf spark.hadoop.fs.s3a.access.key=$${MINIO_ROOT_USER}
