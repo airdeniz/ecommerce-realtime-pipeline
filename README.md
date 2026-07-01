@@ -266,8 +266,8 @@ table. The `unique_key` would be the business key (e.g. `order_id`), and the
 ### Run
 
 ```bash
-git clone https://github.com/airdeniz/ecommerce-realtime-pipeline.git
-cd ecommerce-realtime-pipeline
+git clone https://github.com/airdeniz/ecommerce-lakehouse.git
+cd ecommerce-lakehouse
 cp .env.example .env
 docker compose up -d
 ```
