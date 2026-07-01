@@ -1,4 +1,4 @@
-# E-Commerce Lakehouse
+# ecommerce-lakehouse
 
 A real-time e-commerce data pipeline built with open-source tools on a self-hosted lakehouse. Designed as a portfolio project targeting Turkish e-commerce companies (Trendyol, n11, Hepsiburada).
 
